@@ -108,6 +108,7 @@
                   @keyup.x="exportAction?.$el.click()"
                   @keyup.p="propertiesAction?.$el.click()"
                   @keyup.t="runCollectionAction?.$el.click()"
+                  @keyup.m="mockServerAction?.$el.click()"
                   @keyup.escape="hide()"
                 >
                   <HoppSmartItem
@@ -144,6 +145,19 @@
                     @click="
                       () => {
                         emit('run-collection', props.id)
+                        hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
+                    v-if="!hasNoTeamAccess"
+                    ref="mockServerAction"
+                    :icon="IconServer"
+                    :label="t('mock_server.create_mock_server')"
+                    :shortcut="['M']"
+                    @click="
+                      () => {
+                        emit('create-mock-server')
                         hide()
                       }
                     "
@@ -259,6 +273,7 @@ import IconFolderOpen from "~icons/lucide/folder-open"
 import IconFolderPlus from "~icons/lucide/folder-plus"
 import IconMoreVertical from "~icons/lucide/more-vertical"
 import IconPlaySquare from "~icons/lucide/play-square"
+import IconServer from "~icons/lucide/server"
 import IconSettings2 from "~icons/lucide/settings-2"
 import IconTrash2 from "~icons/lucide/trash-2"
 
@@ -310,6 +325,7 @@ const emit = defineEmits<{
   (event: "duplicate-collection"): void
   (event: "export-data"): void
   (event: "remove-collection"): void
+  (event: "create-mock-server"): void
   (event: "drop-event", payload: DataTransfer): void
   (event: "drag-event", payload: DataTransfer): void
   (event: "dragging", payload: boolean): void
@@ -325,6 +341,7 @@ const edit = ref<HTMLButtonElement | null>(null)
 const duplicateAction = ref<HTMLButtonElement | null>(null)
 const deleteAction = ref<HTMLButtonElement | null>(null)
 const exportAction = ref<HTMLButtonElement | null>(null)
+const mockServerAction = ref<HTMLButtonElement | null>(null)
 const options = ref<TippyComponent | null>(null)
 const propertiesAction = ref<HTMLButtonElement | null>(null)
 const runCollectionAction = ref<HTMLButtonElement | null>(null)
