@@ -70,7 +70,8 @@
     "yes": "Yes",
     "verify": "Verify",
     "enable": "Enable",
-    "disable": "Disable"
+    "disable": "Disable",
+    "assign": "Assign"
   },
   "activity_logs": {
     "ACTIVITY_LOG_DELETE": "Activity log has been deleted",
@@ -118,6 +119,13 @@
     "add_pfx_or_pkcs_file": "Add PFX/PKCS12 File"
   },
   "app": {
+    "additional_links": {
+      "macOS": "macOS",
+      "windows": "Windows",
+      "linux": "Linux",
+      "web_app": "Web App",
+      "cli": "CLI"
+    },
     "chat_with_us": "Chat with us",
     "contact_us": "Contact us",
     "cookies": "Cookies",
@@ -142,7 +150,7 @@
     "options": "Options",
     "proxy_privacy_policy": "Proxy privacy policy",
     "reload": "Reload",
-    "search": "Search",
+    "search": "Search and commands",
     "share": "Share",
     "shortcuts": "Shortcuts",
     "social_description": "Follow us on social media to stay updated with the latest news, updates and releases.",
@@ -232,7 +240,12 @@
       "label_client_credentials": "Client Credentials",
       "label_send_as": "Client Authentication",
       "label_send_in_body": "Send Credentials in Body",
-      "label_send_as_basic_auth": "Send Credentials as Basic Auth"
+      "label_send_as_basic_auth": "Send Credentials as Basic Auth",
+      "enter_value": "Enter value",
+      "auth_request": "Auth Request",
+      "token_request": "Token Request",
+      "refresh_request": "Refresh Request",
+      "send_in": "Send In"
     },
     "pass_key_by": "Pass by",
     "pass_by_query_params_label": "Query Parameters",
@@ -240,10 +253,18 @@
     "password": "Password",
     "save_to_inherit": "Please save this request in any collection to inherit the authorization",
     "token": "Token",
+    "access_token": "Access Token",
+    "client_token": "Client Token",
+    "client_secret": "Client Secret",
+    "timestamp": "Timestamp",
+    "host": "Host",
     "type": "Authorization Type",
     "username": "Username",
     "advance_config": "Advanced Configuration",
     "advance_config_description": "Hoppscotch automatically assigns default values to certain fields if no explicit value is provided",
+    "algorithm": "Algorithm",
+    "payload": "Payload",
+    "secret": "Secret",
     "aws_signature": {
       "access_key": "Access Key",
       "secret_key": "Secret Key",
@@ -260,6 +281,43 @@
       "client_nonce": "Client Nonce",
       "opaque": "Opaque",
       "disable_retry": "Disable Retrying Request"
+    },
+    "akamai": {
+      "headers_to_sign": "Headers to Sign",
+      "max_body_size": "Max Body Size"
+    },
+    "hawk": {
+      "id": "HAWK Auth ID",
+      "key": "HAWK Auth Key",
+      "ext": "ext",
+      "app": "app",
+      "dlg": "dlg",
+      "include": "Include Payload Hash"
+    },
+    "jwt": {
+      "params_name": "Params Name",
+      "param_name": "Parameter Name",
+      "header_prefix": "Header Prefix",
+      "placeholder_request_header": "Request header prefix",
+      "placeholder_request_param": "Request params name",
+      "secret_base64_encoded": "Secret Base64 Encoded",
+      "headers": "JWT Headers",
+      "private_key": "Private Key",
+      "placeholder_headers": "JWT Headers"
+    },
+    "ntlm": {
+      "domain": "Domain",
+      "workstation": "Workstation",
+      "disable_retrying_request": "Disable Retrying Request"
+    },
+    "asap": {
+      "issuer": "Issuer",
+      "audience": "Audience",
+      "expires_in": "Expires In",
+      "key_id": "Key ID",
+      "optional_config": "Optional Configuration",
+      "subject": "Subject",
+      "additional_claims": "Additional Claims"
     }
   },
   "collection": {
@@ -333,11 +391,13 @@
     }
   },
   "count": {
+    "currentValue": "Current value {count}",
+    "description": "Description {count}",
     "header": "Header {count}",
+    "initialValue": "Initial value {count}",
+    "key": "Key {count}",
     "message": "Message {count}",
     "parameter": "Parameter {count}",
-    "key": "Key {count}",
-    "description": "Description {count}",
     "protocol": "Protocol {count}",
     "value": "Value {count}",
     "variable": "Variable {count}"
@@ -356,6 +416,7 @@
     "empty_schema": "No schema found",
     "endpoint": "Endpoint cannot be empty",
     "environments": "Environments are empty",
+    "collection_variables": "Collection variables are empty",
     "folder": "Folder is empty",
     "headers": "This request does not have any headers",
     "history": "History is empty",
@@ -384,6 +445,7 @@
     "added": "Environment addition",
     "create_new": "Create new environment",
     "created": "Environment created",
+    "current_value": "Current value",
     "deleted": "Environment deletion",
     "duplicated": "Environment duplicated",
     "edit": "Edit Environment",
@@ -391,6 +453,7 @@
     "global": "Global",
     "global_variables": "Global variables",
     "import_or_create": "Import or create a environment",
+    "initial_value": "Initial value",
     "invalid_name": "Please provide a name for the environment",
     "list": "Environment variables",
     "my_environments": "Personal Environments",
@@ -401,6 +464,10 @@
     "no_environment": "No environment",
     "no_environment_description": "No environments were selected. Choose what to do with the following variables.",
     "quick_peek": "Environment Quick Peek",
+    "replace_all_current_with_initial": "Replace all current with initial",
+    "replace_all_initial_with_current": "Replace all initial with current",
+    "replace_current_with_initial": "Replace with initial",
+    "replace_initial_with_current": "Replace with current",
     "replace_with_variable": "Replace with variable",
     "scope": "Scope",
     "secrets": "Secrets",
@@ -471,6 +538,7 @@
     "delete_account_description": "You must either remove yourself, transfer ownership, or delete these workspaces before you can delete your account.",
     "delete_activity_log": "Failed to delete activity log",
     "delete_all_activity_logs": "Failed to delete all activity logs",
+    "email_already_exists": "This email already exists with a different account. Please set a different email address.",
     "empty_email_address": "Email Address cannot be empty",
     "empty_profile_name": "Profile name cannot be empty",
     "empty_req_name": "Empty Request Name",
@@ -499,7 +567,7 @@
     "script_fail": "Could not execute pre-request script",
     "something_went_wrong": "Something went wrong",
     "subscription_error": "Failed to subscribe to the topic: {error}",
-    "test_script_fail": "Could not execute post-request script",
+    "post_request_script_fail": "Could not execute post-request script",
     "reading_files": "Error while reading one or more files.",
     "fetching_access_tokens_list": "Something went wrong while fetching the list of tokens",
     "generate_access_token": "Something went wrong while generating the access token",
@@ -576,11 +644,11 @@
     "network_fail": "Unable to reach the API endpoint. Check your network connection or select a different Interceptor and try again.",
     "offline": "You're using Hoppscotch offline. Updates will sync when you're online, based on workspace settings.",
     "offline_short": "You're using Hoppscotch offline.",
-    "post_request_tests": "Test scripts are written in JavaScript, and are run after the response is received.",
+    "post_request_tests": "Post-request scripts are written in JavaScript, and are run after the response is received.",
     "pre_request_script": "Pre-request scripts are written in JavaScript, and are run before the request is sent.",
     "script_fail": "It seems there is a glitch in the pre-request script. Check the error below and fix the script accordingly.",
-    "test_script_fail": "There seems to be an error with test script. Please fix the errors and run tests again",
-    "tests": "Write a test script to automate debugging."
+    "post_request_script_fail": "There seems to be an error with post-request script. Please fix the errors and run tests again",
+    "post_request_script": "Write a post-request script to automate debugging."
   },
   "hide": {
     "collection": "Collapse Collection Panel",
@@ -639,8 +707,15 @@
     "import_summary_requests_title": "Requests",
     "import_summary_responses_title": "Responses",
     "import_summary_pre_request_scripts_title": "Pre-request scripts",
-    "import_summary_test_scripts_title": "Test scripts",
-    "import_summary_not_supported_by_hoppscotch_import": "We do not support importing {featureLabel} from this source right now."
+    "import_summary_post_request_scripts_title": "Post request scripts",
+    "import_summary_not_supported_by_hoppscotch_import": "We do not support importing {featureLabel} from this source right now.",
+    "cors_error_modal": {
+      "title": "CORS Error Detected",
+      "description": "The import failed due to CORS (Cross-Origin Resource Sharing) restrictions imposed by the server.",
+      "explanation": "This is a security feature that prevents web pages from making requests to different domains. You can retry using our proxy service to bypass this restriction.",
+      "url_label": "Attempted URL",
+      "retry_with_proxy": "Retry with Proxy"
+    }
   },
   "instances": {
     "switch": "Switch Hoppscotch Instance",
@@ -787,7 +862,8 @@
     "roles_description": "Roles are used to control access to the shared collections.",
     "updated": "Profile updated",
     "viewer": "Viewer",
-    "viewer_description": "Viewers can only view and use requests."
+    "viewer_description": "Viewers can only view and use requests.",
+    "verified_email_sent": "A verification email has been sent to your email address. Please refresh the page after verifying your email address. You will receive an email if this email is not associated with any other account."
   },
   "remove": {
     "star": "Remove star"
@@ -947,6 +1023,7 @@
     "ai_request_naming_style_pascal_case": "Pascal Case ( PascalCase )",
     "ai_request_naming_style_custom": "Custom",
     "ai_request_naming_style_custom_placeholder": "Enter your custom naming style template...",
+    "experimental_scripting_sandbox": "Experimental scripting sandbox",
     "sync": "Synchronise",
     "sync_collections": "Collections",
     "sync_description": "These settings are synced to cloud.",
@@ -1084,6 +1161,16 @@
       "download": "Download response as file",
       "title": "Response"
     },
+    "tabs": {
+      "title": "Tabs",
+      "new_tab": "New Tab",
+      "close_tab": "Close Tab",
+      "reopen_tab": "Reopen Closed Tab",
+      "next_tab": "Next Tab",
+      "previous_tab": "Previous Tab",
+      "first_tab": "Switch to First Tab",
+      "last_tab": "Switch to Last Tab"
+    },
     "theme": {
       "black": "Switch theme to Black Mode",
       "dark": "Switch theme to Dark Mode",
@@ -1175,6 +1262,10 @@
       "close_others": "Close all other tabs",
       "duplicate": "Duplicate current tab",
       "new_tab": "Open a new tab",
+      "next": "Switch to next tab",
+      "previous": "Switch to previous tab",
+      "switch_to_first": "Switch to first tab",
+      "switch_to_last": "Switch to last tab",
       "title": "Tabs"
     },
     "workspace": {
@@ -1246,7 +1337,7 @@
     "admin_success": "User is now an admin!!",
     "and": "and",
     "clear_selection": "Clear Selection",
-    "configure_auth": "Check out the documentation to configure auth providers.",
+    "configure_auth": "Please set up an auth provider from the admin settings or check out the documentation to configure auth providers.",
     "confirm_admin_to_user": "Do you want to remove admin status from this user?",
     "confirm_admins_to_users": "Do you want to remove admin status from selected users?",
     "confirm_delete_infra_token": "Are you sure you want to delete the infra token {tokenLabel}?",
@@ -1372,6 +1463,7 @@
     "history": "History",
     "mqtt": "MQTT",
     "parameters": "Parameters",
+    "post_request_script": "Post-request Script",
     "pre_request_script": "Pre-request Script",
     "queries": "Queries",
     "query": "Query",
@@ -1382,7 +1474,6 @@
     "share_tab_request": "Share tab request",
     "socketio": "Socket.IO",
     "sse": "SSE",
-    "tests": "Tests",
     "types": "Types",
     "variables": "Variables",
     "websocket": "WebSocket",
@@ -1430,7 +1521,7 @@
     "member_role_updated": "User roles updated",
     "members": "Members",
     "more_members": "+{count} more",
-    "name_length_insufficient": "Workspace name should be at least 6 characters long",
+    "name_length_insufficient": "Workspace name should not be empty",
     "name_updated": "Workspace name updated",
     "new": "New Workspace",
     "new_created": "New workspace created",
@@ -1565,8 +1656,8 @@
     "feedback_cta_request_name": "Did you like the generated name?",
     "modify_request_body_error": "Failed to modify request body",
     "generate_or_modify_prerequest_input_placeholder": "Enter a prompt to generate or modify the pre-request script",
-    "generate_or_modify_test_script_input_placeholder": "Enter a prompt to generate or modify the test script",
-    "modify_test_script_error": "Failed to modify test script",
+    "generate_or_modify_post_request_script_input_placeholder": "Enter a prompt to generate or modify the post-request script",
+    "modify_post_request_script_error": "Failed to modify post-request script",
     "modify_prerequest_error": "Failed to modify pre-request script"
   },
   "configs": {
@@ -1842,5 +1933,9 @@
       "update_billing_cycle": "Are you sure you want to update the billing cycle to {newBillingCycle}?"
     },
     "cancel_subscription": "Cancel subscription"
+  },
+  "app_console": {
+    "entries": "Console entries",
+    "no_entries": "No entries"
   }
 }
