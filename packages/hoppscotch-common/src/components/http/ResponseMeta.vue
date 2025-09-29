@@ -30,24 +30,44 @@
         class="flex-1"
       />
       <HoppSmartPlaceholder
+        v-if="response.type === 'interceptor_error'"
+        :src="`/images/states/${colorMode.value}/upload_error.svg`"
+        :alt="
+          response.error?.humanMessage?.heading?.(t) || t('error.network_fail')
+        "
+        :heading="
+          response.error?.humanMessage?.heading?.(t) || t('error.network_fail')
+        "
+        :text="
+          response.error?.humanMessage?.description?.(t) ||
+          t('error.network_fail')
+        "
+      >
+        <template #body>
+          <AppKernelInterceptor
+            class="rounded border border-dividerLight p-2"
+          />
+        </template>
+      </HoppSmartPlaceholder>
+      <HoppSmartPlaceholder
         v-if="response.type === 'network_fail'"
-        :src="`/images/states/${colorMode.value}/youre_lost.svg`"
+        :src="`/images/states/${colorMode.value}/upload_error.svg`"
         :alt="`${t('error.network_fail')}`"
         :heading="t('error.network_fail')"
         :text="t('helpers.network_fail')"
-        large
       >
         <template #body>
-          <AppInterceptor class="rounded border border-dividerLight p-2" />
+          <AppKernelInterceptor
+            class="rounded border border-dividerLight p-2"
+          />
         </template>
       </HoppSmartPlaceholder>
       <HoppSmartPlaceholder
         v-if="response.type === 'script_fail'"
-        :src="`/images/states/${colorMode.value}/youre_lost.svg`"
+        :src="`/images/states/${colorMode.value}/upload_error.svg`"
         :alt="`${t('error.script_fail')}`"
         :label="t('error.script_fail')"
         :text="t('helpers.script_fail')"
-        large
       >
         <template #body>
           <div
@@ -145,7 +165,8 @@ const readableResponseSize = computed(() => {
     props.response.type === "loading" ||
     props.response.type === "network_fail" ||
     props.response.type === "script_fail" ||
-    props.response.type === "fail"
+    props.response.type === "fail" ||
+    props.response.type === "extension_error"
   )
     return undefined
 
@@ -164,7 +185,8 @@ const statusCategory = computed(() => {
     props.response.type === "loading" ||
     props.response.type === "network_fail" ||
     props.response.type === "script_fail" ||
-    props.response.type === "fail"
+    props.response.type === "fail" ||
+    props.response.type === "extension_error"
   )
     return {
       name: "error",

@@ -3,15 +3,33 @@
     <div
       class="no-scrollbar absolute inset-0 flex flex-1 divide-x divide-dividerLight overflow-x-auto"
     >
+      <input
+        v-if="isSecret"
+        id="secret"
+        v-model="secretText"
+        name="secret"
+        :placeholder="t('environment.secret_value')"
+        class="flex flex-1 bg-transparent pl-4"
+        :class="styles"
+        type="password"
+      />
       <div
+        v-else
         ref="editor"
         :placeholder="placeholder"
-        class="flex flex-1"
+        class="flex flex-1 truncate"
         :class="styles"
         @click="emit('click', $event)"
         @keydown="handleKeystroke"
         @focusin="showSuggestionPopover = true"
-      ></div>
+      />
+      <HoppButtonSecondary
+        v-if="secret"
+        v-tippy="{ theme: 'tooltip' }"
+        :title="isSecret ? t('action.show_secret') : t('action.hide_secret')"
+        :icon="isSecret ? IconEyeoff : IconEye"
+        @click="toggleSecret"
+      />
       <AppInspection
         :inspection-results="inspectionResults"
         class="sticky inset-y-0 right-0 rounded-r bg-primary"
@@ -37,7 +55,7 @@
           v-if="currentSuggestionIndex === index"
           class="hidden items-center text-secondary md:flex"
         >
-          <kbd class="shortcut-key">TAB</kbd>
+          <kbd class="shortcut-key">Enter</kbd>
           <span class="ml-2 truncate">to select</span>
         </div>
       </li>
@@ -55,30 +73,49 @@ import {
   keymap,
   tooltips,
 } from "@codemirror/view"
-import { EditorSelection, EditorState, Extension } from "@codemirror/state"
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  Extension,
+} from "@codemirror/state"
 import { clone } from "lodash-es"
 import { history, historyKeymap } from "@codemirror/commands"
 import { inputTheme } from "~/helpers/editor/themes/baseTheme"
 import { HoppReactiveEnvPlugin } from "~/helpers/editor/extensions/HoppEnvironment"
+import { HoppPredefinedVariablesPlugin } from "~/helpers/editor/extensions/HoppPredefinedVariables"
 import { useReadonlyStream } from "@composables/stream"
 import { AggregateEnvironment, aggregateEnvs$ } from "~/newstore/environments"
 import { platform } from "~/platform"
 import { onClickOutside, useDebounceFn } from "@vueuse/core"
 import { InspectorResult } from "~/services/inspection"
 import { invokeAction } from "~/helpers/actions"
+import { useI18n } from "~/composables/i18n"
+import IconEye from "~icons/lucide/eye"
+import IconEyeoff from "~icons/lucide/eye-off"
+import { CompletionContext, autocompletion } from "@codemirror/autocomplete"
+import { useService } from "dioc/vue"
+import { RESTTabService } from "~/services/tab/rest"
+import { syntaxTree } from "@codemirror/language"
+
+const t = useI18n()
 
 const props = withDefaults(
   defineProps<{
     modelValue?: string
     placeholder?: string
     styles?: string
-    envs?: { key: string; value: string; source: string }[] | null
+    envs?: AggregateEnvironment[] | null
     focus?: boolean
     selectTextOnMount?: boolean
     environmentHighlights?: boolean
+    predefinedVariablesHighlights?: boolean
     readonly?: boolean
     autoCompleteSource?: string[]
     inspectionResults?: InspectorResult[] | undefined
+    contextMenuEnabled?: boolean
+    secret?: boolean
+    autoCompleteEnv?: boolean
   }>(),
   {
     modelValue: "",
@@ -88,9 +125,13 @@ const props = withDefaults(
     focus: false,
     readonly: false,
     environmentHighlights: true,
+    predefinedVariablesHighlights: true,
     autoCompleteSource: undefined,
     inspectionResult: undefined,
     inspectionResults: undefined,
+    contextMenuEnabled: true,
+    secret: false,
+    autoCompleteEnvSource: false,
   }
 )
 
@@ -116,9 +157,29 @@ const showSuggestionPopover = ref(false)
 const suggestionsMenu = ref<any | null>(null)
 const autoCompleteWrapper = ref<any | null>(null)
 
+const isSecret = ref(props.secret)
+
+const secretText = ref(props.modelValue)
+
+// Compartment to store the readOnly state of the editor
+const readOnly = new Compartment()
+
+watch(
+  () => secretText.value,
+  (newVal) => {
+    if (isSecret.value) {
+      updateModelValue(newVal)
+    }
+  }
+)
+
 onClickOutside(autoCompleteWrapper, () => {
   showSuggestionPopover.value = false
 })
+
+const toggleSecret = () => {
+  isSecret.value = !isSecret.value
+}
 
 //filter autocompleteSource with unique values
 const uniqueAutoCompleteSource = computed(() => {
@@ -167,36 +228,39 @@ watch(
 )
 
 const handleKeystroke = (ev: KeyboardEvent) => {
-  if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(ev.key)) {
+  if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(ev.key)) {
     ev.preventDefault()
   }
 
-  if (ev.shiftKey) {
+  if (["Escape", "Tab", "Shift"].includes(ev.key)) {
     showSuggestionPopover.value = false
-    return
   }
 
-  showSuggestionPopover.value = true
+  if (ev.key === "Enter") {
+    if (suggestions.value.length > 0 && currentSuggestionIndex.value > -1) {
+      updateModelValue(suggestions.value[currentSuggestionIndex.value])
+      currentSuggestionIndex.value = -1
 
-  if (
-    ["Enter", "Tab"].includes(ev.key) &&
-    suggestions.value.length > 0 &&
-    currentSuggestionIndex.value > -1
-  ) {
-    updateModelValue(suggestions.value[currentSuggestionIndex.value])
-    currentSuggestionIndex.value = -1
-
-    //used to set codemirror cursor at the end of the line after selecting a suggestion
-    nextTick(() => {
-      view.value?.dispatch({
-        selection: EditorSelection.create([
-          EditorSelection.range(
-            props.modelValue.length,
-            props.modelValue.length
-          ),
-        ]),
+      //used to set codemirror cursor at the end of the line after selecting a suggestion
+      nextTick(() => {
+        view.value?.dispatch({
+          selection: EditorSelection.create([
+            EditorSelection.range(
+              props.modelValue.length,
+              props.modelValue.length
+            ),
+          ]),
+        })
       })
-    })
+    }
+
+    if (showSuggestionPopover.value) {
+      showSuggestionPopover.value = false
+    } else {
+      emit("enter", ev)
+    }
+  } else {
+    showSuggestionPopover.value = true
   }
 
   if (ev.key === "ArrowDown") {
@@ -219,15 +283,6 @@ const handleKeystroke = (ev: KeyboardEvent) => {
         : 0
 
     emit("keyup", ev)
-  }
-
-  if (ev.key === "Enter") {
-    emit("enter", ev)
-    showSuggestionPopover.value = false
-  }
-
-  if (ev.key === "Escape") {
-    showSuggestionPopover.value = false
   }
 
   // used to scroll to the first suggestion when left arrow is pressed
@@ -313,17 +368,69 @@ const aggregateEnvs = useReadonlyStream(aggregateEnvs$, []) as Ref<
   AggregateEnvironment[]
 >
 
-const envVars = computed(() =>
-  props.envs
-    ? props.envs.map((x) => ({
-        key: x.key,
-        value: x.value,
-        sourceEnv: x.source,
-      }))
-    : aggregateEnvs.value
-)
+const tabs = useService(RESTTabService)
+
+const envVars = computed(() => {
+  if (props.envs) {
+    return props.envs.map((x) => {
+      const { key, secret } = x
+      const value = secret ? "********" : x.value
+      const sourceEnv = "sourceEnv" in x ? x.sourceEnv : null
+      return {
+        key,
+        value,
+        sourceEnv,
+        secret,
+      }
+    })
+  }
+
+  const requestVariables =
+    tabs.currentActiveTab.value.document.type === "example-response"
+      ? tabs.currentActiveTab.value.document.response.originalRequest
+          .requestVariables
+      : tabs.currentActiveTab.value.document.type === "request"
+        ? tabs.currentActiveTab.value.document.request.requestVariables
+        : []
+
+  return [
+    ...requestVariables.map(({ active, key, value }) =>
+      active
+        ? {
+            key,
+            value,
+            sourceEnv: "RequestVariable",
+            secret: false,
+          }
+        : ({} as AggregateEnvironment)
+    ),
+    ...aggregateEnvs.value,
+  ]
+})
+
+function envAutoCompletion(context: CompletionContext) {
+  const options = (envVars.value ?? [])
+    .map((env) => ({
+      label: env?.key ? `<<${env.key}>>` : "",
+      info: env?.value ?? "",
+      apply: env?.key ? `<<${env.key}>>` : "",
+    }))
+    .filter(Boolean)
+
+  const nodeBefore = syntaxTree(context.state).resolveInner(context.pos, -1)
+  const textBefore = context.state.sliceDoc(nodeBefore.from, context.pos)
+  const tagBefore = /<<\$?\w*$/.exec(textBefore) // Update regex to match <<$ as well
+
+  if (!tagBefore && !context.explicit) return null
+  return {
+    from: tagBefore ? nodeBefore.from + tagBefore.index : context.pos,
+    options: options,
+    validFor: /^(<<\$?\w*)?$/,
+  }
+}
 
 const envTooltipPlugin = new HoppReactiveEnvPlugin(envVars, view)
+const predefinedVariablePlugin = new HoppPredefinedVariablesPlugin()
 
 function handleTextSelection() {
   const selection = view.value?.state.selection.main
@@ -331,7 +438,9 @@ function handleTextSelection() {
     const { from, to } = selection
     if (from === to) return
     const text = view.value?.state.doc.sliceString(from, to)
-    const { top, left } = view.value?.coordsAtPos(from)
+    const coords = view.value?.coordsAtPos(from)
+    const top = coords?.top ?? 0
+    const left = coords?.left ?? 0
     if (text) {
       invokeAction("contextmenu.open", {
         position: {
@@ -353,26 +462,39 @@ function handleTextSelection() {
   }
 }
 
-const initView = (el: any) => {
-  // Debounce to prevent double click from selecting the word
-  const debounceFn = useDebounceFn(() => {
+// Debounce to prevent double click from selecting the word
+const debouncedTextSelection = (time: number) =>
+  useDebounceFn(() => {
     handleTextSelection()
-  }, 140)
+  }, time)
 
-  el.addEventListener("mouseup", debounceFn)
-  el.addEventListener("keyup", debounceFn)
+const initView = (el: any) => {
+  // Only add event listeners if context menu is enabled in the component
+  if (props.contextMenuEnabled) {
+    el.addEventListener("mouseup", debouncedTextSelection(140))
+    el.addEventListener("keyup", debouncedTextSelection(140))
+  }
 
-  const extensions: Extension = [
-    EditorView.contentAttributes.of({ "aria-label": props.placeholder }),
-    EditorView.contentAttributes.of({ "data-enable-grammarly": "false" }),
+  const extensions: Extension = getExtensions(props.readonly || isSecret.value)
+  view.value = new EditorView({
+    parent: el,
+    state: EditorState.create({
+      doc: props.modelValue,
+      extensions,
+    }),
+  })
+}
+
+const getExtensions = (readonly: boolean): Extension => {
+  const readOnlyConfigs = [
     EditorView.updateListener.of((update) => {
-      if (props.readonly) {
+      if (readonly) {
         update.view.contentDOM.inputMode = "none"
+        update.view.contentDOM.contentEditable = "false"
       }
     }),
-    EditorState.changeFilter.of(() => !props.readonly),
-    inputTheme,
-    props.readonly
+    EditorState.changeFilter.of(() => !readonly),
+    readonly
       ? EditorView.theme({
           ".cm-content": {
             caretColor: "var(--secondary-dark-color)",
@@ -382,10 +504,19 @@ const initView = (el: any) => {
           },
         })
       : EditorView.theme({}),
+  ]
+
+  const extensions: Extension = [
+    EditorView.contentAttributes.of({ "aria-label": props.placeholder }),
+    EditorView.contentAttributes.of({ "data-enable-grammarly": "false" }),
+    inputTheme,
+    readOnly.of(readOnlyConfigs),
     tooltips({
+      parent: document.body,
       position: "absolute",
     }),
     props.environmentHighlights ? envTooltipPlugin : [],
+    props.predefinedVariablesHighlights ? predefinedVariablePlugin : [],
     placeholderExt(props.placeholder),
     EditorView.domEventHandlers({
       paste(ev) {
@@ -396,14 +527,22 @@ const initView = (el: any) => {
         ev.preventDefault()
       },
       scroll(event) {
-        if (event.target) {
-          handleTextSelection()
+        if (event.target && props.contextMenuEnabled) {
+          // Debounce to make the performance better
+          debouncedTextSelection(30)()
         }
       },
     }),
+    props.autoCompleteEnv
+      ? autocompletion({
+          activateOnTyping: true,
+          override: [envAutoCompletion],
+        })
+      : [],
     ViewPlugin.fromClass(
       class {
         update(update: ViewUpdate) {
+          // since the readonly prop is reactive, we need to check if it has changed
           if (props.readonly) return
 
           if (update.docChanged) {
@@ -436,6 +575,17 @@ const initView = (el: any) => {
               clipboardEv = null
               pastedValue = null
             }
+
+            if (props.contextMenuEnabled) {
+              // close the context menu if text is being updated in the editor
+              invokeAction("contextmenu.open", {
+                position: {
+                  top: 0,
+                  left: 0,
+                },
+                text: null,
+              })
+            }
           }
         }
       }
@@ -443,14 +593,7 @@ const initView = (el: any) => {
     history(),
     keymap.of([...historyKeymap]),
   ]
-
-  view.value = new EditorView({
-    parent: el,
-    state: EditorState.create({
-      doc: props.modelValue,
-      extensions,
-    }),
-  })
+  return extensions
 }
 
 const triggerTextSelection = () => {
@@ -463,11 +606,11 @@ const triggerTextSelection = () => {
     })
   })
 }
-
 onMounted(() => {
   if (editor.value) {
     if (!view.value) initView(editor.value)
     if (props.selectTextOnMount) triggerTextSelection()
+    if (props.focus) view.value?.focus()
     platform.ui?.onCodemirrorInstanceMount?.(editor.value)
   }
 })
@@ -481,6 +624,51 @@ watch(editor, () => {
     view.value = undefined
   }
 })
+
+/**
+ * Watch for changes in the readonly prop
+ * and update the editor state accordingly
+ */
+watch(
+  () => props.readonly,
+  (isReadOnly) => {
+    if (isReadOnly) {
+      view.value?.dispatch({
+        effects: readOnly.reconfigure([
+          EditorView.theme({
+            ".cm-content": {
+              caretColor: "var(--secondary-dark-color)",
+              color: "var(--secondary-dark-color)",
+              backgroundColor: "var(--divider-color)",
+              opacity: 0.25,
+            },
+          }),
+          EditorState.changeFilter.of(() => false),
+          EditorState.readOnly.of(true),
+        ]),
+      })
+
+      //change input mode and contenteditable to false to prevent keyboard input
+      view.value?.contentDOM.setAttribute("inputmode", "none")
+      view.value?.contentDOM.setAttribute("contenteditable", "false")
+    } else {
+      view.value?.dispatch({
+        effects: readOnly.reconfigure([
+          EditorView.theme({}),
+          EditorState.changeFilter.of(() => true),
+          EditorState.readOnly.of(false),
+        ]),
+      })
+
+      //change input mode and contenteditable to true to allow keyboard input
+      view.value?.contentDOM.setAttribute("inputmode", "text")
+      view.value?.contentDOM.setAttribute("contenteditable", "true")
+    }
+  },
+  {
+    immediate: true,
+  }
+)
 </script>
 
 <style lang="scss" scoped>

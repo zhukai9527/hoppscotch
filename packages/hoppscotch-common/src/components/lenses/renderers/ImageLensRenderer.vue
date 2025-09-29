@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-1 flex-col">
+  <div>
     <div
       class="sticky top-lowerSecondaryStickyFold z-10 flex flex-shrink-0 items-center justify-between overflow-x-auto border-b border-dividerLight bg-primary pl-4"
     >
@@ -19,7 +19,7 @@
       </div>
     </div>
     <img
-      class="flex max-w-full border-b border-dividerLight"
+      class="max-w-full"
       :src="imageSource"
       loading="lazy"
       :alt="imageSource"
@@ -67,14 +67,17 @@ const responseType = computed(() =>
 
 const { downloadIcon, downloadResponse } = useDownloadResponse(
   responseType.value,
-  computed(() => props.response.body)
+  computed(() => props.response.body),
+  t("filename.lens", {
+    request_name: props.response.req.name,
+  })
 )
 
 watch(props.response, () => {
   imageSource.value = ""
   const buf = props.response.body
   const bytes = new Uint8Array(buf)
-  const blob = new Blob([bytes.buffer])
+  const blob = new Blob([bytes.buffer], { type: responseType.value })
 
   const reader = new FileReader()
   reader.onload = ({ target }) => {
@@ -88,7 +91,7 @@ onMounted(() => {
   imageSource.value = ""
   const buf = props.response.body
   const bytes = new Uint8Array(buf)
-  const blob = new Blob([bytes.buffer])
+  const blob = new Blob([bytes.buffer], { type: responseType.value })
 
   const reader = new FileReader()
   reader.onload = ({ target }) => {

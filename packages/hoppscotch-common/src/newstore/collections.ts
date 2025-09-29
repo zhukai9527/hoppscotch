@@ -1,20 +1,22 @@
-import { pluck } from "rxjs/operators"
 import {
-  HoppGQLRequest,
-  HoppRESTRequest,
+  generateUniqueRefId,
   HoppCollection,
-  makeCollection,
   HoppGQLAuth,
+  HoppGQLRequest,
+  HoppRESTAuth,
+  HoppRESTHeaders,
+  HoppRESTRequest,
+  makeCollection,
 } from "@hoppscotch/data"
-import DispatchingStore, { defineDispatchers } from "./DispatchingStore"
 import { cloneDeep } from "lodash-es"
+import { pluck } from "rxjs/operators"
 import { resolveSaveContextOnRequestReorder } from "~/helpers/collection/request"
-import { getService } from "~/modules/dioc"
-import { RESTTabService } from "~/services/tab/rest"
+import { GQLHeader } from "@hoppscotch/data"
 import { HoppInheritedProperty } from "~/helpers/types/HoppInheritedProperties"
-import { HoppRESTAuth } from "@hoppscotch/data"
-import { HoppRESTHeaders } from "@hoppscotch/data"
-import { HoppGQLHeader } from "~/helpers/graphql"
+import { getService } from "~/modules/dioc"
+import { getI18n } from "~/modules/i18n"
+import { RESTTabService } from "~/services/tab/rest"
+import DispatchingStore, { defineDispatchers } from "./DispatchingStore"
 
 const defaultRESTCollectionState = {
   state: [
@@ -61,14 +63,14 @@ export function navigateToFolderWithIndexPath(
 
   let target = collections[indexPaths.shift() as number]
 
-  while (indexPaths.length > 0)
+  while (indexPaths.length > 0 && target)
     target = target.folders[indexPaths.shift() as number]
 
   return target !== undefined ? target : null
 }
 
 /**
- * Used to obtain the inherited auth and headers for a given folder path, used for both REST and GraphQL
+ * Used to obtain the inherited auth and headers for a given folder path, used for both REST and GraphQL personal collections
  * @param folderPath the path of the folder to cascade the auth from
  * @param type the type of collection
  * @returns the inherited auth and headers for the given folder path
@@ -116,7 +118,7 @@ export function cascadeParentCollectionForHeaderAuth(
     const parentFolderAuth = parentFolder.auth as HoppRESTAuth | HoppGQLAuth
     const parentFolderHeaders = parentFolder.headers as
       | HoppRESTHeaders
-      | HoppGQLHeader[]
+      | GQLHeader[]
 
     // check if the parent folder has authType 'inherit' and if it is the root folder
     if (
@@ -488,6 +490,68 @@ const restCollectionDispatchers = defineDispatchers({
     }
 
     reorderItems(containingFolder.folders, folderIndex, destinationFolderIndex)
+
+    return {
+      state: newState,
+    }
+  },
+
+  duplicateCollection(
+    { state }: RESTCollectionStoreType,
+    // `collectionSyncID` is used to sync the duplicated collection in `collections.sync.ts`
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    { path, collectionSyncID }: { path: string; collectionSyncID?: string }
+  ) {
+    const t = getI18n()
+
+    const newState = state
+
+    const indexPaths = path.split("/").map((x) => parseInt(x))
+
+    const isRootCollection = indexPaths.length === 1
+
+    const collection = navigateToFolderWithIndexPath(state, [...indexPaths])
+
+    if (collection) {
+      const name = `${collection.name} - ${t("action.duplicate")}`
+
+      function recursiveChangeRefIdToAvoidConflicts(
+        collection: HoppCollection
+      ): HoppCollection {
+        const newCollection = {
+          ...collection,
+          _ref_id: generateUniqueRefId("coll"),
+        }
+
+        newCollection.folders = newCollection.folders.map((folder) =>
+          recursiveChangeRefIdToAvoidConflicts(folder)
+        )
+
+        return newCollection
+      }
+
+      const duplicatedCollection = {
+        ...cloneDeep(collection),
+        name,
+        ...(collection.id
+          ? { id: `${collection.id}-duplicate-collection` }
+          : {}),
+      }
+
+      const duplicatedCollectionWithNewRefId =
+        recursiveChangeRefIdToAvoidConflicts(duplicatedCollection)
+
+      if (isRootCollection) {
+        newState.push(duplicatedCollectionWithNewRefId)
+      } else {
+        const parentCollectionIndexPath = indexPaths.slice(0, -1)
+
+        const parentCollection = navigateToFolderWithIndexPath(state, [
+          ...parentCollectionIndexPath,
+        ])
+        parentCollection?.folders.push(duplicatedCollectionWithNewRefId)
+      }
+    }
 
     return {
       state: newState,
@@ -896,6 +960,50 @@ const gqlCollectionDispatchers = defineDispatchers({
     }
   },
 
+  duplicateCollection(
+    { state }: GraphqlCollectionStoreType,
+    // `collectionSyncID` is used to sync the duplicated collection in `gqlCollections.sync.ts`
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    { path, collectionSyncID }: { path: string; collectionSyncID?: string }
+  ) {
+    const t = getI18n()
+
+    const newState = state
+
+    const indexPaths = path.split("/").map((x) => parseInt(x))
+
+    const isRootCollection = indexPaths.length === 1
+
+    const collection = navigateToFolderWithIndexPath(state, [...indexPaths])
+
+    if (collection) {
+      const name = `${collection.name} - ${t("action.duplicate")}`
+
+      const duplicatedCollection = {
+        ...cloneDeep(collection),
+        name,
+        ...(collection.id
+          ? { id: `${collection.id}-duplicate-collection` }
+          : {}),
+      }
+
+      if (isRootCollection) {
+        newState.push(duplicatedCollection)
+      } else {
+        const parentCollectionIndexPath = indexPaths.slice(0, -1)
+
+        const parentCollection = navigateToFolderWithIndexPath(state, [
+          ...parentCollectionIndexPath,
+        ])
+        parentCollection?.folders.push(duplicatedCollection)
+      }
+    }
+
+    return {
+      state: newState,
+    }
+  },
+
   editRequest(
     { state }: GraphqlCollectionStoreType,
     {
@@ -1109,6 +1217,97 @@ export function getRESTCollection(collectionIndex: number) {
   return restCollectionStore.value.state[collectionIndex]
 }
 
+function computeCollectionInheritedProps(
+  collection: HoppCollection,
+  ref_id: string,
+  type: "my-collections" | "team-collections" = "my-collections",
+  parentAuth: HoppRESTAuth | null = null,
+  parentHeaders: HoppRESTHeaders | null = null
+): { auth: HoppRESTAuth; headers: HoppRESTHeaders } | null {
+  // Determine the inherited authentication and headers
+  const inheritedAuth =
+    collection.auth?.authType === "inherit" && collection.auth.authActive
+      ? (parentAuth ?? { authType: "none", authActive: false })
+      : (collection.auth ?? { authType: "none", authActive: false })
+
+  const inheritedHeaders: HoppRESTHeaders = [
+    ...(parentHeaders ?? []),
+    ...collection.headers,
+  ]
+
+  // Check if the current collection matches the target reference ID
+  const isTargetCollection =
+    type === "my-collections"
+      ? collection._ref_id === ref_id
+      : collection.id === ref_id
+
+  if (isTargetCollection) {
+    return {
+      auth: inheritedAuth,
+      headers: inheritedHeaders,
+    }
+  }
+
+  // Recursively search in folders
+  for (const folder of collection.folders) {
+    const result = computeCollectionInheritedProps(
+      folder,
+      ref_id,
+      type,
+      inheritedAuth,
+      inheritedHeaders
+    )
+    if (result) return result // Return as soon as a match is found
+  }
+
+  return null
+}
+
+export function getRESTCollectionInheritedProps(
+  collectionID: string,
+  collections: HoppCollection[] = restCollectionStore.value.state,
+  type: "my-collections" | "team-collections" = "my-collections"
+): { auth: HoppRESTAuth; headers: HoppRESTHeaders } | null {
+  for (const collection of collections) {
+    const result = computeCollectionInheritedProps(
+      collection,
+      collectionID,
+      type
+    )
+
+    if (result) {
+      return result
+    }
+  }
+
+  return null
+}
+
+function findCollection(
+  collection: HoppCollection,
+  ref_id: string
+): HoppCollection | null {
+  if (collection._ref_id === ref_id) {
+    return collection
+  }
+  for (const folder of collection.folders) {
+    const found = findCollection(folder, ref_id)
+    if (found) {
+      return found
+    }
+  }
+  return null
+}
+
+export function getRESTCollectionByRefId(ref_id: string) {
+  for (const collection of restCollectionStore.value.state) {
+    const found = findCollection(collection, ref_id)
+    if (found) {
+      return found
+    }
+  }
+}
+
 export function editRESTCollection(
   collectionIndex: number,
   partialCollection: Partial<HoppCollection>
@@ -1158,6 +1357,19 @@ export function moveRESTFolder(path: string, destinationPath: string | null) {
     payload: {
       path,
       destinationPath,
+    },
+  })
+}
+
+export function duplicateRESTCollection(
+  path: string,
+  collectionSyncID?: string
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "duplicateCollection",
+    payload: {
+      path,
+      collectionSyncID,
     },
   })
 }
@@ -1362,6 +1574,19 @@ export function removeGraphqlFolder(path: string, folderID?: string) {
   })
 }
 
+export function duplicateGraphQLCollection(
+  path: string,
+  collectionSyncID?: string
+) {
+  graphqlCollectionStore.dispatch({
+    dispatcher: "duplicateCollection",
+    payload: {
+      path,
+      collectionSyncID,
+    },
+  })
+}
+
 export function removeDuplicateGraphqlCollectionOrFolder(
   id: string,
   collectionPath: string,
@@ -1393,6 +1618,14 @@ export function editGraphqlRequest(
 }
 
 export function saveGraphqlRequestAs(path: string, request: HoppGQLRequest) {
+  // For calculating the insertion request index
+  const targetLocation = navigateToFolderWithIndexPath(
+    graphqlCollectionStore.value.state,
+    path.split("/").map((x) => parseInt(x))
+  )
+
+  const insertionIndex = targetLocation!.requests.length
+
   graphqlCollectionStore.dispatch({
     dispatcher: "saveRequestAs",
     payload: {
@@ -1400,6 +1633,8 @@ export function saveGraphqlRequestAs(path: string, request: HoppGQLRequest) {
       request,
     },
   })
+
+  return insertionIndex
 }
 
 export function removeGraphqlRequest(

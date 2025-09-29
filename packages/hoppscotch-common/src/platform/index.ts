@@ -1,33 +1,44 @@
-import { AuthPlatformDef } from "./auth"
-import { UIPlatformDef } from "./ui"
-import { EnvironmentsPlatformDef } from "./environments"
-import { CollectionsPlatformDef } from "./collections"
-import { SettingsPlatformDef } from "./settings"
-import { HistoryPlatformDef } from "./history"
-import { TabStatePlatformDef } from "./tab"
-import { AnalyticsPlatformDef } from "./analytics"
-import { InterceptorsPlatformDef } from "./interceptors"
+import { ServiceClassInstance } from "dioc"
+import { Ref } from "vue"
 import { HoppModule } from "~/modules"
+import { AnalyticsPlatformDef } from "./analytics"
+import { AuthPlatformDef } from "./auth"
+import { CollectionsPlatformDef } from "./collections"
+import { EnvironmentsPlatformDef } from "./environments"
+import { ExperimentsPlatformDef } from "./experiments"
+import { HistoryPlatformDef } from "./history"
+import { InfraPlatformDef } from "./infra"
 import { InspectorsPlatformDef } from "./inspectors"
-import { Service } from "dioc"
-import { IOPlatformDef } from "./io"
+import { KernelInterceptorsPlatformDef } from "./kernel-interceptors"
+// NOTE: To be deprecated
+// import { InterceptorsPlatformDef } from "./interceptors"
+// import { IOPlatformDef } from "./io"
+import { LimitsPlatformDef } from "./limits"
+import { SettingsPlatformDef } from "./settings"
 import { SpotlightPlatformDef } from "./spotlight"
+import { UIPlatformDef } from "./ui"
+import { BackendPlatformDef } from "./backend"
+import { OrganizationPlatformDef } from "./organization"
+import { KernelIO } from "./kernel-io"
 
 export type PlatformDef = {
   ui?: UIPlatformDef
   addedHoppModules?: HoppModule[]
-  addedServices?: Array<typeof Service<unknown> & { ID: string }>
+  addedServices?: Array<ServiceClassInstance<unknown>>
   auth: AuthPlatformDef
   analytics?: AnalyticsPlatformDef
-  io: IOPlatformDef
+  // NOTE: To be deprecated
+  // io: IOPlatformDef
+  kernelIO: KernelIO
   sync: {
     environments: EnvironmentsPlatformDef
     collections: CollectionsPlatformDef
     settings: SettingsPlatformDef
     history: HistoryPlatformDef
-    tabState: TabStatePlatformDef
   }
-  interceptors: InterceptorsPlatformDef
+  // NOTE: To be deprecated
+  // interceptors: InterceptorsPlatformDef
+  kernelInterceptors: KernelInterceptorsPlatformDef
   additionalInspectors?: InspectorsPlatformDef
   spotlight?: SpotlightPlatformDef
   platformFeatureFlags: {
@@ -47,7 +58,17 @@ export type PlatformDef = {
      * If a value is not given, then the value is assumed to be true
      */
     promptAsUsingCookies?: boolean
+
+    /**
+     * Whether to show the A/B testing workspace switcher click login flow or not
+     */
+    workspaceSwitcherLogin?: Ref<boolean>
   }
+  limits?: LimitsPlatformDef
+  infra?: InfraPlatformDef
+  experiments?: ExperimentsPlatformDef
+  backend: BackendPlatformDef
+  organization?: OrganizationPlatformDef
 }
 
 export let platform: PlatformDef

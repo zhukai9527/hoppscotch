@@ -16,6 +16,22 @@ export type NetworkResponse = AxiosResponse<unknown> & {
       endTime: number
     }
   }
+  /**
+   * Optional additional fields with special optional metadata that can be used
+   */
+  additional?: {
+    /**
+     * By the HTTP spec, we can have multiple headers with the same name, but
+     * this is not accessible in the AxiosResponse type as the headers there are Record<string, string>
+     * (and hence cannot have secondary values).
+     *
+     * If this value is present, headers can be read from here which will have the data.
+     */
+    multiHeaders?: Array<{
+      key: string
+      value: string
+    }>
+  }
 }
 
 /**
@@ -88,9 +104,21 @@ export type Interceptor<Err extends InterceptorError = InterceptorError> = {
 
   /**
    * Defines whether the interceptor has support for cookies.
-   * If this field is undefined, it is assumed as not supporting cookies.
+   * If this field is undefined, it is assumed as *not supporting* cookies.
    */
   supportsCookies?: boolean
+
+  /**
+   * Defines whether the interceptor has support for Digest Auth.
+   * If this field is undefined, it is assumed as *not supporting* the Digest Auth type.
+   */
+  supportsDigestAuth?: boolean
+
+  /**
+   * Defines whether the interceptor has support for Binary (file) content type.
+   * If this field is undefined, it is assumed as *supporting* the Binary content type.
+   */
+  supportsBinaryContentType?: boolean
 
   /**
    * Defines what to render in the Interceptor section of the Settings page.
@@ -178,9 +206,7 @@ export class InterceptorService extends Service {
     return this.interceptors.get(this.currentInterceptorID.value)
   })
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     // If the current interceptor is unselectable, select the first selectable one, else null
     watch([() => this.interceptors, this.currentInterceptorID], () => {
       if (!this.currentInterceptorID.value) return
@@ -231,5 +257,9 @@ export class InterceptorService extends Service {
       )
 
     return interceptor.runRequest(req)
+  }
+
+  public static convertArrayBufferToString(data: ArrayBuffer): string {
+    return new TextDecoder().decode(data).replace(/\0+$/, "")
   }
 }

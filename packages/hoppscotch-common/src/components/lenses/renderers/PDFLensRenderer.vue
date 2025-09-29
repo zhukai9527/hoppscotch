@@ -51,9 +51,14 @@ const pdfsrc = computed(() =>
   )
 )
 
+const filename = t("filename.lens", {
+  request_name: props.response.req.name,
+})
+
 const { downloadIcon, downloadResponse } = useDownloadResponse(
   "application/pdf",
-  computed(() => props.response.body)
+  computed(() => props.response.body),
+  `${filename}.pdf`
 )
 
 defineActionHandler("response.file.download", () => downloadResponse())

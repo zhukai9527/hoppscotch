@@ -21,7 +21,7 @@
           <label for="value" class="min-w-[2.5rem] font-semibold">{{
             t("environment.value")
           }}</label>
-          <input
+          <SmartEnvInput
             v-model="editingValue"
             type="text"
             class="input"
@@ -71,20 +71,21 @@
 
 <script lang="ts" setup>
 import { Environment } from "@hoppscotch/data"
+import { useService } from "dioc/vue"
+import * as TE from "fp-ts/TaskEither"
+import { pipe } from "fp-ts/function"
 import { ref, watch } from "vue"
 import { useI18n } from "~/composables/i18n"
 import { useToast } from "~/composables/toast"
 import { GQLError } from "~/helpers/backend/GQLClient"
+import { updateTeamEnvironment } from "~/helpers/backend/mutations/TeamEnvironment"
+import { getEnvActionErrorMessage } from "~/helpers/error-messages"
 import { TeamEnvironment } from "~/helpers/teams/TeamEnvironment"
 import {
   addEnvironmentVariable,
   addGlobalEnvVariable,
 } from "~/newstore/environments"
-import * as TE from "fp-ts/TaskEither"
-import { pipe } from "fp-ts/function"
-import { updateTeamEnvironment } from "~/helpers/backend/mutations/TeamEnvironment"
 import { RESTTabService } from "~/services/tab/rest"
-import { useService } from "dioc/vue"
 
 const t = useI18n()
 const toast = useToast()
@@ -154,12 +155,14 @@ const addEnvironment = async () => {
     addGlobalEnvVariable({
       key: editingName.value,
       value: editingValue.value,
+      secret: false,
     })
     toast.success(`${t("environment.updated")}`)
   } else if (scope.value.type === "my-environment") {
     addEnvironmentVariable(scope.value.index, {
       key: editingName.value,
       value: editingValue.value,
+      secret: false,
     })
     toast.success(`${t("environment.updated")}`)
   } else {
@@ -179,7 +182,7 @@ const addEnvironment = async () => {
       TE.match(
         (err: GQLError<string>) => {
           console.error(err)
-          toast.error(`${getErrorMessage(err)}`)
+          toast.error(t(getEnvActionErrorMessage(err)))
         },
         () => {
           hideModal()
@@ -200,19 +203,5 @@ const addEnvironment = async () => {
   }
 
   hideModal()
-}
-
-const getErrorMessage = (err: GQLError<string>) => {
-  if (err.type === "network_error") {
-    return t("error.network_error")
-  }
-  switch (err.error) {
-    case "team_environment/not_found":
-      return t("team_environment.not_found")
-    case "Forbidden resource":
-      return t("profile.no_permission")
-    default:
-      return t("error.something_went_wrong")
-  }
 }
 </script>

@@ -4,12 +4,14 @@ import {
   ViewPlugin,
   ViewUpdate,
   placeholder,
+  tooltips,
 } from "@codemirror/view"
 import {
   Extension,
   EditorState,
   Compartment,
   EditorSelection,
+  Prec,
 } from "@codemirror/state"
 import {
   Language,
@@ -23,11 +25,21 @@ import { linter } from "@codemirror/lint"
 import { watch, ref, Ref, onMounted, onBeforeUnmount } from "vue"
 import { javascriptLanguage } from "@codemirror/lang-javascript"
 import { xmlLanguage } from "@codemirror/lang-xml"
-import { jsonLanguage } from "@codemirror/lang-json"
+import { jsoncLanguage } from "@shopify/lang-jsonc"
 import { GQLLanguage } from "@hoppscotch/codemirror-lang-graphql"
 import { html } from "@codemirror/legacy-modes/mode/xml"
 import { shell } from "@codemirror/legacy-modes/mode/shell"
 import { yaml } from "@codemirror/legacy-modes/mode/yaml"
+import { rust } from "@codemirror/legacy-modes/mode/rust"
+import { go } from "@codemirror/legacy-modes/mode/go"
+import { clojure } from "@codemirror/legacy-modes/mode/clojure"
+import { http } from "@codemirror/legacy-modes/mode/http"
+import { csharp, java } from "@codemirror/legacy-modes/mode/clike"
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell"
+import { python } from "@codemirror/legacy-modes/mode/python"
+import { r } from "@codemirror/legacy-modes/mode/r"
+import { ruby } from "@codemirror/legacy-modes/mode/ruby"
+import { swift } from "@codemirror/legacy-modes/mode/swift"
 import { isJSONContentType } from "@helpers/utils/contenttypes"
 import { useStreamSubscriber } from "@composables/stream"
 import { Completer } from "@helpers/editor/completion"
@@ -45,9 +57,11 @@ import { useDebounceFn } from "@vueuse/core"
 // TODO: Migrate from legacy mode
 
 import * as E from "fp-ts/Either"
+import { HoppPredefinedVariablesPlugin } from "~/helpers/editor/extensions/HoppPredefinedVariables"
 
 type ExtendedEditorConfig = {
   mode: string
+  useLang: boolean
   placeholder: string
   readOnly: boolean
   lineWrapping: boolean
@@ -61,10 +75,22 @@ type CodeMirrorOptions = {
   // NOTE: This property is not reactive
   environmentHighlights: boolean
 
+  /**
+   * Whether or not to highlight predefined variables, such as: `<<$guid>>`.
+   * - These are special variables that starts with a dolar sign.
+   */
+  predefinedVariablesHighlights?: boolean
+
   additionalExts?: Extension[]
+
+  contextMenuEnabled?: boolean
 
   // callback on editor update
   onUpdate?: (view: ViewUpdate) => void
+  onChange?: (value: string) => void
+
+  // callback on view initialization
+  onInit?: (view: EditorView) => void
 }
 
 const hoppCompleterExt = (completer: Completer): Extension => {
@@ -141,10 +167,45 @@ const hoppLang = (
   return language ? new LanguageSupport(language, exts) : exts
 }
 
+/**
+ * Map of language MIME types to their corresponding language definitions
+ * where the import name matches the langMime string exactly.
+ * These are used with `StreamLanguage.define(...)` to register the language.
+ */
+const streamLanguageMap: Record<string, any> = {
+  rust,
+  clojure,
+  csharp,
+  go,
+  http,
+  java,
+  powershell: powerShell,
+  python,
+  shell,
+  html,
+  r,
+  ruby,
+  swift,
+}
+
+/**
+ * Returns the appropriate CodeMirror language object based on the provided MIME type.
+ *
+ * Handles specific content types like JSON, JavaScript, GraphQL, XML, etc.
+ * For simpler languages that directly match the import name, uses a lookup map
+ * to reduce repetition and automatically defines the StreamLanguage.
+ *
+ * @param langMime - The MIME type or shorthand language identifier (e.g., "javascript", "go", "python")
+ * @returns The corresponding CodeMirror Language object
+ */
 const getLanguage = (langMime: string): Language | null => {
+  // Special case for JSON types
   if (isJSONContentType(langMime)) {
-    return jsonLanguage
-  } else if (langMime === "application/javascript") {
+    return jsoncLanguage
+  } else if (
+    langMime === "application/javascript" ||
+    langMime === "javascript"
+  ) {
     return javascriptLanguage
   } else if (langMime === "graphql") {
     return GQLLanguage
@@ -158,7 +219,13 @@ const getLanguage = (langMime: string): Language | null => {
     return StreamLanguage.define(yaml)
   }
 
-  // None matched, so return null
+  // Handle cases where langMime directly matches the import name
+  const streamLang = streamLanguageMap[langMime]
+  if (streamLang) {
+    return StreamLanguage.define(streamLang)
+  }
+
+  // If no match is found, return null
   return null
 }
 
@@ -205,8 +272,15 @@ export function useCodemirror(
   el: Ref<any | null>,
   value: Ref<string | undefined>,
   options: CodeMirrorOptions
-): { cursor: Ref<{ line: number; ch: number }> } {
+): {
+  cursor: Ref<{ line: number; ch: number }>
+} {
   const { subscribeToStream } = useStreamSubscriber()
+
+  // Set default value for contextMenuEnabled if not provided
+  options.contextMenuEnabled = options.contextMenuEnabled ?? true
+  options.extendedEditorConfig.useLang =
+    options.extendedEditorConfig.useLang ?? true
 
   const additionalExts = new Compartment()
   const language = new Compartment()
@@ -230,14 +304,36 @@ export function useCodemirror(
     ? new HoppEnvironmentPlugin(subscribeToStream, view)
     : null
 
+  const closeContextMenu = () => {
+    invokeAction("contextmenu.open", {
+      position: {
+        top: 0,
+        left: 0,
+      },
+      text: null,
+    })
+  }
+  const predefinedVariable: HoppPredefinedVariablesPlugin | null =
+    options.predefinedVariablesHighlights
+      ? new HoppPredefinedVariablesPlugin()
+      : null
+
   function handleTextSelection() {
     const selection = view.value?.state.selection.main
     if (selection) {
       const { from, to } = selection
-      if (from === to) return
+
+      // If the selection is empty, hide the context menu
+      if (from === to) {
+        closeContextMenu()
+        return
+      }
+
       const text = view.value?.state.doc.sliceString(from, to)
-      const { top, left } = view.value?.coordsAtPos(from)
-      if (text) {
+      const coords = view.value?.coordsAtPos(to)
+      const top = coords?.top ?? 0
+      const left = coords?.left ?? 0
+      if (text?.trim()) {
         invokeAction("contextmenu.open", {
           position: {
             top,
@@ -246,16 +342,16 @@ export function useCodemirror(
           text,
         })
       } else {
-        invokeAction("contextmenu.open", {
-          position: {
-            top,
-            left,
-          },
-          text: null,
-        })
+        closeContextMenu()
       }
     }
   }
+
+  // Debounce to prevent double click from selecting the word
+  const debouncedTextSelection = (time: number) =>
+    useDebounceFn(() => {
+      handleTextSelection()
+    }, time)
 
   const initView = (el: any) => {
     if (el) platform.ui?.onCodemirrorInstanceMount?.(el)
@@ -264,34 +360,26 @@ export function useCodemirror(
       basicSetup,
       baseTheme,
       syntaxHighlighting(baseHighlightStyle, { fallback: true }),
+
       ViewPlugin.fromClass(
         class {
           update(update: ViewUpdate) {
-            // Debounce to prevent double click from selecting the word
-            const debounceFn = useDebounceFn(() => {
-              handleTextSelection()
-            }, 140)
-
-            el.addEventListener("mouseup", debounceFn)
-            el.addEventListener("keyup", debounceFn)
+            // Only add event listeners if context menu is enabled in the editor
+            if (options.contextMenuEnabled) {
+              el.addEventListener("mouseup", debouncedTextSelection(140))
+              el.addEventListener("keyup", debouncedTextSelection(140))
+            }
 
             if (options.onUpdate) {
               options.onUpdate(update)
             }
 
-            if (update.selectionSet) {
-              const cursorPos = update.state.selection.main.head
-              const line = update.state.doc.lineAt(cursorPos)
+            const cursorPos = update.state.selection.main.head
+            const line = update.state.doc.lineAt(cursorPos)
 
-              cachedCursor.value = {
-                line: line.number - 1,
-                ch: cursorPos - line.from,
-              }
-
-              cursor.value = {
-                line: cachedCursor.value.line,
-                ch: cachedCursor.value.ch,
-              }
+            cachedCursor.value = {
+              line: line.number - 1,
+              ch: cursorPos - line.from,
             }
 
             cursor.value = {
@@ -304,16 +392,25 @@ export function useCodemirror(
               cachedValue.value = update.state.doc
                 .toJSON()
                 .join(update.state.lineBreak)
-              if (!options.extendedEditorConfig.readOnly)
+              if (!options.extendedEditorConfig.readOnly) {
                 value.value = cachedValue.value
+                if (options.onChange) {
+                  options.onChange(cachedValue.value)
+                }
+              }
             }
           }
         }
       ),
+
       EditorView.domEventHandlers({
-        scroll(event) {
-          if (event.target) {
-            handleTextSelection()
+        scroll(event, view) {
+          // HACK: This is a workaround to fix the issue in CodeMirror where the content doesn't load when the editor is not in view.
+          view.requestMeasure()
+
+          if (event.target && options.contextMenuEnabled) {
+            // close the context menu when the editor is scrolled
+            closeContextMenu()
           }
         },
       }),
@@ -328,7 +425,9 @@ export function useCodemirror(
       ),
       language.of(
         getEditorLanguage(
-          options.extendedEditorConfig.mode ?? "",
+          options.extendedEditorConfig.useLang
+            ? ((options.extendedEditorConfig.mode as any) ?? "")
+            : "",
           options.linter ?? undefined,
           options.completer ?? undefined
         )
@@ -351,11 +450,26 @@ export function useCodemirror(
           run: indentLess,
         },
       ]),
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Ctrl-Enter" /* Windows */,
+            mac: "Cmd-Enter" /* Mac */,
+            preventDefault: true,
+            run: () => true,
+          },
+        ])
+      ),
+      tooltips({
+        parent: document.body,
+        position: "absolute",
+      }),
       EditorView.contentAttributes.of({ "data-enable-grammarly": "false" }),
       additionalExts.of(options.additionalExts ?? []),
     ]
 
     if (environmentTooltip) extensions.push(environmentTooltip.extension)
+    if (predefinedVariable) extensions.push(predefinedVariable.extension)
 
     view.value = new EditorView({
       parent: el,
@@ -363,7 +477,11 @@ export function useCodemirror(
         doc: parseDoc(value.value, options.extendedEditorConfig.mode ?? ""),
         extensions,
       }),
+      // scroll to top when mounting
+      scrollTo: EditorView.scrollIntoView(0),
     })
+
+    options.onInit?.(view.value)
   }
 
   onMounted(() => {
@@ -419,7 +537,9 @@ export function useCodemirror(
       view.value?.dispatch({
         effects: language.reconfigure(
           getEditorLanguage(
-            (options.extendedEditorConfig.mode as any) ?? "",
+            options.extendedEditorConfig.useLang
+              ? ((options.extendedEditorConfig.mode as any) ?? "")
+              : "",
             options.linter ?? undefined,
             options.completer ?? undefined
           )
@@ -464,7 +584,8 @@ export function useCodemirror(
         cachedCursor.value.ch !== newPos.ch
       ) {
         const line = view.value.state.doc.line(newPos.line + 1)
-        const selUpdate = EditorSelection.cursor(line.from + newPos.ch - 1)
+        const ch = newPos.ch === -1 ? line.length : newPos.ch
+        const selUpdate = EditorSelection.cursor(line.from + ch)
 
         view.value?.focus()
 

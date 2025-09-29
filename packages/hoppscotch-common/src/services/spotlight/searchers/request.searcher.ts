@@ -20,6 +20,7 @@ import IconRotateCCW from "~icons/lucide/rotate-ccw"
 import IconSave from "~icons/lucide/save"
 import { GQLOptionTabs } from "~/components/graphql/RequestOptions.vue"
 import { RESTTabService } from "~/services/tab/rest"
+import { Container } from "dioc"
 
 type Doc = {
   text: string | string[]
@@ -46,7 +47,11 @@ export class RequestSpotlightSearcherService extends StaticSpotlightSearcherServ
   private readonly restTab = this.bind(RESTTabService)
 
   private route = useRoute()
-  private isRESTPage = computed(() => this.route.name === "index")
+  private isRESTPage = computed(
+    () =>
+      this.route.name === "index" &&
+      this.restTab.currentActiveTab.value.document.type === "request"
+  )
   private isGQLPage = computed(() => this.route.name === "graphql")
   private isRESTOrGQLPage = computed(
     () => this.isRESTPage.value || this.isGQLPage.value
@@ -224,15 +229,18 @@ export class RequestSpotlightSearcherService extends StaticSpotlightSearcherServ
     },
   })
 
-  constructor() {
-    super({
+  // TODO: Constructors are no longer recommended as of dioc > 3, use onServiceInit instead
+  constructor(c: Container) {
+    super(c, {
       searchFields: ["text", "alternates"],
       fieldWeights: {
         text: 2,
         alternates: 1,
       },
     })
+  }
 
+  override onServiceInit() {
     this.setDocuments(this.documents)
     this.spotlight.registerSearcher(this)
   }
@@ -268,11 +276,14 @@ export class RequestSpotlightSearcherService extends StaticSpotlightSearcherServ
       case "save_to_collections":
         invokeAction("request.save-as", {
           requestType: "rest",
-          request: this.restTab.currentActiveTab.value?.document.request,
+          request:
+            this.restTab.currentActiveTab.value?.document.type === "request"
+              ? this.restTab.currentActiveTab.value?.document.request
+              : null,
         })
         break
       case "save_request":
-        invokeAction("request.save")
+        invokeAction("request-response.save")
         break
       case "rename_request":
         invokeAction("request.rename")

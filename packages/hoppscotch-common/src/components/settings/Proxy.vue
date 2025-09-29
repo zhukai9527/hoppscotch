@@ -8,25 +8,16 @@
       :label="t('app.proxy_privacy_policy')"
     />.
   </div>
-  <div class="space-y-4 py-4">
-    <div class="flex items-center">
-      <HoppSmartToggle
-        :on="proxyEnabled"
-        @change="proxyEnabled = !proxyEnabled"
-      >
-        {{ t("settings.proxy_use_toggle") }}
-      </HoppSmartToggle>
-    </div>
-  </div>
   <div class="flex items-center space-x-2 py-4">
     <HoppSmartInput
-      v-model="PROXY_URL"
+      v-model="proxyUrl"
       :autofocus="false"
       styles="flex-1"
-      placeholder=" "
+      :placeholder="' '"
       :label="t('settings.proxy_url')"
       input-styles="input floating-input"
-      :disabled="!proxyEnabled"
+      :disabled="!enabled"
+      @change="updateProxyUrl"
     />
     <HoppButtonSecondary
       v-tippy="{ theme: 'tooltip' }"
@@ -34,57 +25,78 @@
       :icon="clearIcon"
       outline
       class="rounded"
-      @click="resetProxy"
+      @click="resetSettings"
     />
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted, computed, watch } from "vue"
 import { refAutoReset } from "@vueuse/core"
+
+import { useService } from "dioc/vue"
+
 import { useI18n } from "~/composables/i18n"
-import { useSetting } from "~/composables/settings"
+import { useToast } from "~/composables/toast"
+import { useReadonlyStream } from "~/composables/stream"
+import { getDefaultProxyUrl } from "~/helpers/proxyUrl"
+import { platform } from "~/platform"
+
+import { KernelInterceptorProxyStore } from "~/platform/std/kernel-interceptors/proxy/store"
+import { ProxyKernelInterceptorService } from "~/platform/std/kernel-interceptors/proxy/index"
+
+import { KernelInterceptorService } from "~/services/kernel-interceptor.service"
+
 import IconRotateCCW from "~icons/lucide/rotate-ccw"
 import IconCheck from "~icons/lucide/check"
-import { useToast } from "~/composables/toast"
-import { computed } from "vue"
-import { useService } from "dioc/vue"
-import { InterceptorService } from "~/services/interceptor.service"
-import { proxyInterceptor } from "~/platform/std/interceptors/proxy"
-import { platform } from "~/platform"
 
 const t = useI18n()
 const toast = useToast()
 
-const interceptorService = useService(InterceptorService)
+const store = useService(KernelInterceptorProxyStore)
+const interceptorService = useService(KernelInterceptorService)
+const proxyInterceptorService = useService(ProxyKernelInterceptorService)
 
-const PROXY_URL = useSetting("PROXY_URL")
+const proxyUrl = ref("")
 
-const proxyEnabled = computed({
-  get() {
-    return (
-      interceptorService.currentInterceptorID.value ===
-      proxyInterceptor.interceptorID
-    )
-  },
-  set(active) {
-    if (active) {
-      interceptorService.currentInterceptorID.value =
-        proxyInterceptor.interceptorID
-    } else {
-      interceptorService.currentInterceptorID.value =
-        platform.interceptors.default
+const currentUser = useReadonlyStream(
+  platform.auth.getCurrentUserStream(),
+  platform.auth.getCurrentUser()
+)
+
+async function updateProxyUrl() {
+  await store.updateSettings({ proxyUrl: proxyUrl.value })
+  toast.success(t("state.saved"))
+}
+
+watch(
+  () => currentUser.value,
+  async () => {
+    if (!currentUser.value) {
+      proxyUrl.value = await getDefaultProxyUrl()
     }
-  },
-})
+  }
+)
+
+const enabled = computed(
+  () => interceptorService.getCurrentId() === proxyInterceptorService.id
+)
 
 const clearIcon = refAutoReset<typeof IconRotateCCW | typeof IconCheck>(
   IconRotateCCW,
   1000
 )
 
-const resetProxy = () => {
-  PROXY_URL.value = "https://proxy.hoppscotch.io/"
+async function resetSettings() {
+  await store.resetSettings()
+  const settings = store.getSettings()
+  proxyUrl.value = settings.proxyUrl
   clearIcon.value = IconCheck
-  toast.success(`${t("state.cleared")}`)
+  toast.success(t("state.cleared"))
 }
+
+onMounted(async () => {
+  const settings = store.getSettings()
+  proxyUrl.value = settings.proxyUrl
+})
 </script>

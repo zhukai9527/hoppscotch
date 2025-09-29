@@ -23,9 +23,9 @@
         <HoppButtonSecondary
           v-tippy="{ theme: 'tooltip' }"
           :title="t('state.linewrap')"
-          :class="{ '!text-accent': linewrapEnabled }"
+          :class="{ '!text-accent': WRAP_LINES }"
           :icon="IconWrapText"
-          @click.prevent="linewrapEnabled = !linewrapEnabled"
+          @click.prevent="toggleNestedSetting('WRAP_LINES', 'httpRequestBody')"
         />
         <HoppButtonSecondary
           v-if="
@@ -41,6 +41,13 @@
           :title="t('action.prettify')"
           :icon="prettifyIcon"
           @click="prettifyRequestBody"
+        />
+        <HoppButtonSecondary
+          v-if="shouldEnableAIFeatures"
+          v-tippy="{ theme: 'tooltip' }"
+          :title="t('ai_experiments.modify_with_ai')"
+          :icon="IconSparkles"
+          @click="showModifyBodyModal"
         />
         <label for="payload">
           <HoppButtonSecondary
@@ -59,7 +66,16 @@
         />
       </div>
     </div>
-    <div ref="rawBodyParameters" class="flex flex-1 flex-col"></div>
+    <div class="h-full relative flex flex-col flex-1">
+      <div ref="rawBodyParameters" class="absolute inset-0"></div>
+    </div>
+
+    <AiexperimentsModifyBodyModal
+      v-if="isModifyBodyModalOpen"
+      :current-body="codemirrorValue ?? ''"
+      @close-modal="isModifyBodyModalOpen = false"
+      @update-body="(updatedBody) => (codemirrorValue = updatedBody)"
+    ></AiexperimentsModifyBodyModal>
   </div>
 </template>
 
@@ -71,6 +87,7 @@ import IconFilePlus from "~icons/lucide/file-plus"
 import IconWand2 from "~icons/lucide/wand-2"
 import IconCheck from "~icons/lucide/check"
 import IconInfo from "~icons/lucide/info"
+import IconSparkles from "~icons/lucide/sparkles"
 import { computed, reactive, Ref, ref, watch } from "vue"
 import * as TO from "fp-ts/TaskOption"
 import { pipe } from "fp-ts/function"
@@ -82,9 +99,16 @@ import { pluckRef } from "@composables/ref"
 import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
 import { isJSONContentType } from "~/helpers/utils/contenttypes"
-import jsonLinter from "~/helpers/editor/linting/json"
+import jsoncLinter from "~/helpers/editor/linting/jsonc"
 import { readFileAsText } from "~/helpers/functional/files"
 import xmlFormat from "xml-formatter"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
+import { useAIExperiments } from "~/composables/ai-experiments"
+import { prettifyJSONC } from "~/helpers/editor/linting/jsoncPretty"
+import { useReadonlyStream } from "~/composables/stream"
+import { platform } from "~/platform"
+import { invokeAction } from "~/helpers/actions"
 
 type PossibleContentTypes = Exclude<
   ValidContentTypes,
@@ -119,10 +143,10 @@ const rawInputEditorLang = computed(() =>
   getEditorLangForMimeType(body.value.contentType)
 )
 const langLinter = computed(() =>
-  isJSONContentType(body.value.contentType) ? jsonLinter : null
+  isJSONContentType(body.value.contentType) ? jsoncLinter : null
 )
 
-const linewrapEnabled = ref(true)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "httpRequestBody")
 const rawBodyParameters = ref<any | null>(null)
 
 const codemirrorValue: Ref<string | undefined> =
@@ -138,7 +162,7 @@ watch(rawParamsBody, (newVal) => {
 
 // propagate the edits from codemirror back to the body
 watch(codemirrorValue, (updatedValue) => {
-  if (updatedValue && updatedValue !== rawParamsBody.value) {
+  if (updatedValue !== undefined && updatedValue !== rawParamsBody.value) {
     rawParamsBody.value = updatedValue
   }
 })
@@ -148,13 +172,14 @@ useCodemirror(
   codemirrorValue,
   reactive({
     extendedEditorConfig: {
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
       mode: rawInputEditorLang,
       placeholder: t("request.raw_body").toString(),
     },
     linter: langLinter,
     completer: null,
     environmentHighlights: true,
+    predefinedVariablesHighlights: true,
   })
 )
 
@@ -183,8 +208,7 @@ const prettifyRequestBody = () => {
   let prettifyBody = ""
   try {
     if (body.value.contentType.endsWith("json")) {
-      const jsonObj = JSON.parse(rawParamsBody.value as string)
-      prettifyBody = JSON.stringify(jsonObj, null, 2)
+      prettifyBody = prettifyJSONC(rawParamsBody.value as string)
     } else if (body.value.contentType === "application/xml") {
       prettifyBody = prettifyXML(rawParamsBody.value as string)
     }
@@ -196,6 +220,24 @@ const prettifyRequestBody = () => {
     toast.error(`${t("error.json_prettify_invalid_body")}`)
   }
 }
+
+const isModifyBodyModalOpen = ref(false)
+
+const currentUser = useReadonlyStream(
+  platform.auth.getCurrentUserStream(),
+  platform.auth.getCurrentUser()
+)
+
+const showModifyBodyModal = () => {
+  if (!currentUser.value) {
+    invokeAction("modals.login.toggle")
+    return
+  }
+
+  isModifyBodyModalOpen.value = true
+}
+
+const { shouldEnableAIFeatures } = useAIExperiments()
 
 const prettifyXML = (xml: string) => {
   return xmlFormat(xml, {

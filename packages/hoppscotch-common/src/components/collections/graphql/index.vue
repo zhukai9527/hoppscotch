@@ -54,6 +54,7 @@
         @add-request="addRequest($event)"
         @add-folder="addFolder($event)"
         @edit-folder="editFolder($event)"
+        @duplicate-collection="duplicateCollection($event)"
         @edit-request="editRequest($event)"
         @duplicate-request="duplicateRequest($event)"
         @select-collection="$emit('use-collection', collection)"
@@ -138,6 +139,7 @@
       :folder-path="editingFolderPath"
       :request="editingRequest"
       :request-index="editingRequestIndex"
+      :request-context="editingRequest"
       :editing-request-name="editingRequest ? editingRequest.name : ''"
       @hide-modal="displayModalEditRequest(false)"
     />
@@ -146,8 +148,10 @@
       @hide-modal="displayModalImportExport(false)"
     />
     <CollectionsProperties
+      v-model="collectionPropertiesModalActiveTab"
       :show="showModalEditProperties"
       :editing-properties="editingProperties"
+      source="GraphQL"
       @hide-modal="displayModalEditProperties(false)"
       @set-collection-properties="setCollectionProperties"
     />
@@ -155,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from "vue"
+import { nextTick, onMounted, ref } from "vue"
 import { clone, cloneDeep } from "lodash-es"
 import {
   graphqlCollections$,
@@ -165,6 +169,7 @@ import {
   editGraphqlCollection,
   editGraphqlFolder,
   moveGraphqlRequest,
+  duplicateGraphQLCollection,
 } from "~/newstore/collections"
 import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
@@ -177,15 +182,20 @@ import { useService } from "dioc/vue"
 import { GQLTabService } from "~/services/tab/graphql"
 import { computed } from "vue"
 import {
+  getDefaultGQLRequest,
   HoppCollection,
   HoppGQLRequest,
-  makeGQLRequest,
 } from "@hoppscotch/data"
 import { Picked } from "~/helpers/types/HoppPicked"
 import { HoppInheritedProperty } from "~/helpers/types/HoppInheritedProperties"
 import { updateInheritedPropertiesForAffectedRequests } from "~/helpers/collection/collection"
 import { useToast } from "~/composables/toast"
 import { getRequestsByPath } from "~/helpers/collection/request"
+import { PersistenceService } from "~/services/persistence"
+import { PersistedOAuthConfig } from "~/services/oauth/oauth.service"
+import { GQLOptionTabs } from "~/components/graphql/RequestOptions.vue"
+import { EditingProperties } from "../Properties.vue"
+import { defineActionHandler } from "~/helpers/actions"
 
 const t = useI18n()
 const toast = useToast()
@@ -193,7 +203,7 @@ const toast = useToast()
 defineProps<{
   // Whether to activate the ability to pick items (activates 'select' events)
   saveRequest: boolean
-  picked: Picked
+  picked: Picked | null
 }>()
 
 const collections = useReadonlyStream(graphqlCollections$, [], "deep")
@@ -219,7 +229,7 @@ const editingRequest = ref<HoppGQLRequest | null>(null)
 const editingRequestIndex = ref<number | null>(null)
 
 const editingProperties = ref<{
-  collection: HoppCollection | null
+  collection: Partial<HoppCollection> | null
   isRootCollection: boolean
   path: string
   inheritedProperties?: HoppInheritedProperty
@@ -231,6 +241,56 @@ const editingProperties = ref<{
 })
 
 const filterText = ref("")
+
+const persistenceService = useService(PersistenceService)
+
+const collectionPropertiesModalActiveTab = ref<GQLOptionTabs>("headers")
+
+onMounted(async () => {
+  const localOAuthTempConfig =
+    await persistenceService.getLocalConfig("oauth_temp_config")
+
+  if (!localOAuthTempConfig) {
+    return
+  }
+
+  const { context, source, token, refresh_token }: PersistedOAuthConfig =
+    JSON.parse(localOAuthTempConfig)
+
+  if (source === "REST") {
+    return
+  }
+
+  if (context?.type === "collection-properties") {
+    // load the unsaved editing properties
+    const unsavedCollectionPropertiesString =
+      await persistenceService.getLocalConfig("unsaved_collection_properties")
+
+    if (unsavedCollectionPropertiesString) {
+      const unsavedCollectionProperties: EditingProperties = JSON.parse(
+        unsavedCollectionPropertiesString
+      )
+
+      const auth = unsavedCollectionProperties.collection?.auth
+
+      if (auth?.authType === "oauth-2") {
+        const grantTypeInfo = auth.grantTypeInfo
+
+        grantTypeInfo && (grantTypeInfo.token = token ?? "")
+
+        if (refresh_token && grantTypeInfo.grantType === "AUTHORIZATION_CODE") {
+          grantTypeInfo.refreshToken = refresh_token
+        }
+      }
+
+      editingProperties.value = unsavedCollectionProperties
+    }
+
+    await persistenceService.removeLocalConfig("oauth_temp_config")
+    collectionPropertiesModalActiveTab.value = "authorization"
+    showModalEditProperties.value = true
+  }
+})
 
 const filteredCollections = computed(() => {
   const collectionsClone = clone(collections.value)
@@ -326,21 +386,21 @@ const editCollection = (
   displayModalEdit(true)
 }
 
-const onAddRequest = ({
-  name,
+const duplicateCollection = ({
   path,
-  index,
+  collectionSyncID,
 }: {
-  name: string
   path: string
-  index: number
-}) => {
+  collectionSyncID?: string
+}) => duplicateGraphQLCollection(path, collectionSyncID)
+
+const onAddRequest = ({ name, path }: { name: string; path: string }) => {
   const newRequest = {
-    ...tabs.currentActiveTab.value.document.request,
+    ...getDefaultGQLRequest(),
     name,
   }
 
-  saveGraphqlRequestAs(path, newRequest)
+  const insertionIndex = saveGraphqlRequestAs(path, newRequest)
 
   const { auth, headers } = cascadeParentCollectionForHeaderAuth(
     path,
@@ -351,7 +411,7 @@ const onAddRequest = ({
     saveContext: {
       originLocation: "user-collection",
       folderPath: path,
-      requestIndex: index,
+      requestIndex: insertionIndex,
     },
     request: newRequest,
     isDirty: false,
@@ -473,23 +533,13 @@ const selectRequest = ({
     tabs.setActiveTab(possibleTab.value.id)
     return
   }
-
   tabs.createNewTab({
     saveContext: {
       originLocation: "user-collection",
       folderPath: folderPath,
       requestIndex: requestIndex,
     },
-    request: cloneDeep(
-      makeGQLRequest({
-        name: request.name,
-        url: request.url,
-        query: request.query,
-        headers: request.headers,
-        variables: request.variables,
-        auth: request.auth,
-      })
-    ),
+    request: cloneDeep(request),
     isDirty: false,
     inheritedProperties: {
       auth,
@@ -557,7 +607,7 @@ const editProperties = ({
   if (collectionIndex === null || collection === null) return
 
   const parentIndex = collectionIndex.split("/").slice(0, -1).join("/") // remove last folder to get parent folder
-  let inheritedProperties = {}
+  let inheritedProperties = undefined
 
   if (parentIndex) {
     const { auth, headers } = cascadeParentCollectionForHeaderAuth(
@@ -568,7 +618,7 @@ const editProperties = ({
     inheritedProperties = {
       auth,
       headers,
-    } as HoppInheritedProperty
+    }
   }
 
   editingProperties.value = {
@@ -582,11 +632,15 @@ const editProperties = ({
 }
 
 const setCollectionProperties = (newCollection: {
-  collection: HoppCollection
+  collection: Partial<HoppCollection> | null
   path: string
   isRootCollection: boolean
 }) => {
   const { collection, path, isRootCollection } = newCollection
+  if (!collection) {
+    return
+  }
+
   if (isRootCollection) {
     editGraphqlCollection(parseInt(path), collection)
   } else {
@@ -619,4 +673,11 @@ const resetSelectedData = () => {
   editingRequest.value = null
   editingRequestIndex.value = null
 }
+
+defineActionHandler("collection.new", () => {
+  displayModalAdd(true)
+})
+defineActionHandler("modals.collection.import", () => {
+  displayModalImportExport(true)
+})
 </script>

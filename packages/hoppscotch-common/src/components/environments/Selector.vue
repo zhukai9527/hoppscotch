@@ -26,12 +26,20 @@
         <div
           ref="envSelectorActions"
           role="menu"
-          class="flex flex-col focus:outline-none"
+          class="flex flex-col space-y-2 focus:outline-none"
           tabindex="0"
           @keyup.escape="hide()"
         >
+          <SmartEnvInput
+            v-model="filterText"
+            :placeholder="`${t('action.search')}`"
+            :context-menu-enabled="false"
+            class="border border-dividerDark focus:border-primaryDark rounded"
+            :readonly="isFilterInputDisabled"
+          />
           <HoppSmartItem
             v-if="!isScopeSelector"
+            class="my-2"
             :label="`${t('environment.no_environment')}`"
             :info-icon="
               selectedEnvironmentIndex.type === 'NO_ENV_SELECTED'
@@ -65,7 +73,7 @@
           />
           <HoppSmartTabs
             v-model="selectedEnvTab"
-            :styles="`sticky overflow-x-auto my-2 border border-divider rounded flex-shrink-0 z-10 top-0 bg-primary ${
+            :styles="`sticky overflow-x-auto mb-2  border border-divider rounded flex-shrink-0 z-10 top-0 bg-primary ${
               !isTeamSelected || workspace.type === 'personal'
                 ? 'bg-primaryLight'
                 : ''
@@ -77,29 +85,47 @@
               :label="`${t('environment.my_environments')}`"
             >
               <HoppSmartItem
-                v-for="(gen, index) in myEnvironments"
+                v-for="{ env, index } in filteredAndAlphabetizedPersonalEnvs"
                 :key="`gen-${index}`"
                 :icon="IconLayers"
-                :label="gen.name"
+                :label="env.name"
                 :info-icon="isEnvActive(index) ? IconCheck : undefined"
                 :active-info-icon="isEnvActive(index)"
                 @click="
                   () => {
                     handleEnvironmentChange(index, {
                       type: 'my-environment',
-                      environment: gen,
+                      environment: env,
                     })
                     hide()
                   }
                 "
               />
               <HoppSmartPlaceholder
-                v-if="myEnvironments.length === 0"
-                :src="`/images/states/${colorMode.value}/blockchain.svg`"
-                :alt="`${t('empty.environments')}`"
-                :text="t('empty.environments')"
-              />
+                v-if="filteredAndAlphabetizedPersonalEnvs.length === 0"
+                class="break-words"
+                :src="
+                  filterText
+                    ? undefined
+                    : `/images/states/${colorMode.value}/blockchain.svg`
+                "
+                :alt="
+                  filterText
+                    ? `${t('empty.search_environment')}`
+                    : t('empty.environments')
+                "
+                :text="
+                  filterText
+                    ? `${t('empty.search_environment')} '${filterText}'`
+                    : t('empty.environments')
+                "
+              >
+                <template v-if="filterText" #icon>
+                  <icon-lucide-search class="svg-icons opacity-75" />
+                </template>
+              </HoppSmartPlaceholder>
             </HoppSmartTab>
+
             <HoppSmartTab
               :id="'team-environments'"
               :label="`${t('environment.team_environments')}`"
@@ -116,35 +142,52 @@
               </div>
               <div v-if="isTeamSelected" class="flex flex-col">
                 <HoppSmartItem
-                  v-for="(gen, index) in teamEnvironmentList"
+                  v-for="{ env, index } in filteredAndAlphabetizedTeamEnvs"
                   :key="`gen-team-${index}`"
                   :icon="IconLayers"
-                  :label="gen.environment.name"
-                  :info-icon="isEnvActive(gen.id) ? IconCheck : undefined"
-                  :active-info-icon="isEnvActive(gen.id)"
+                  :label="env.environment.name"
+                  :info-icon="isEnvActive(env.id) ? IconCheck : undefined"
+                  :active-info-icon="isEnvActive(env.id)"
                   @click="
                     () => {
                       handleEnvironmentChange(index, {
                         type: 'team-environment',
-                        environment: gen,
+                        environment: env,
                       })
                       hide()
                     }
                   "
                 />
                 <HoppSmartPlaceholder
-                  v-if="teamEnvironmentList.length === 0"
-                  :src="`/images/states/${colorMode.value}/blockchain.svg`"
-                  :alt="`${t('empty.environments')}`"
-                  :text="t('empty.environments')"
-                />
+                  v-if="filteredAndAlphabetizedTeamEnvs.length === 0"
+                  class="break-words"
+                  :src="
+                    filteredAndAlphabetizedTeamEnvs.length === 0 && !filterText
+                      ? `/images/states/${colorMode.value}/blockchain.svg`
+                      : undefined
+                  "
+                  :alt="
+                    filterText
+                      ? `${t('empty.search_environment')}`
+                      : t('empty.environments')
+                  "
+                  :text="
+                    filterText
+                      ? `${t('empty.search_environment')} '${filterText}'`
+                      : t('empty.environments')
+                  "
+                >
+                  <template v-if="filterText" #icon>
+                    <icon-lucide-search class="svg-icons opacity-75" />
+                  </template>
+                </HoppSmartPlaceholder>
               </div>
               <div
                 v-if="!teamListLoading && teamAdapterError"
                 class="flex flex-col items-center py-4"
               >
                 <icon-lucide-help-circle class="svg-icons mb-4" />
-                {{ getErrorMessage(teamAdapterError) }}
+                {{ t(getEnvActionErrorMessage(teamAdapterError)) }}
               </div>
             </HoppSmartTab>
           </HoppSmartTabs>
@@ -202,7 +245,7 @@
                 </span>
               </div>
               <div
-                v-for="(variable, index) in globalEnvs"
+                v-for="(variable, index) in globalEnvs.variables"
                 :key="index"
                 class="flex flex-1 space-x-4"
               >
@@ -210,10 +253,16 @@
                   {{ variable.key }}
                 </span>
                 <span class="min-w-[9rem] w-full truncate text-secondaryLight">
-                  {{ variable.value }}
+                  <template v-if="variable.secret"> ******** </template>
+                  <template v-else>
+                    {{ variable.value }}
+                  </template>
                 </span>
               </div>
-              <div v-if="globalEnvs.length === 0" class="text-secondaryLight">
+              <div
+                v-if="globalEnvs.variables.length === 0"
+                class="text-secondaryLight"
+              >
                 {{ t("environment.empty_variables") }}
               </div>
             </div>
@@ -265,7 +314,10 @@
                   {{ variable.key }}
                 </span>
                 <span class="min-w-[9rem] w-full truncate text-secondaryLight">
-                  {{ variable.value }}
+                  <template v-if="variable.secret"> ******** </template>
+                  <template v-else>
+                    {{ variable.value }}
+                  </template>
                 </span>
               </div>
               <div
@@ -283,33 +335,36 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch } from "vue"
-import IconCheck from "~icons/lucide/check"
-import IconLayers from "~icons/lucide/layers"
-import IconEye from "~icons/lucide/eye"
-import IconEdit from "~icons/lucide/edit"
-import IconGlobe from "~icons/lucide/globe"
+import { useColorMode } from "@composables/theming"
+import { Environment, GlobalEnvironment } from "@hoppscotch/data"
+import { breakpointsTailwind, useBreakpoints } from "@vueuse/core"
+import { useService } from "dioc/vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { TippyComponent } from "vue-tippy"
 import { useI18n } from "~/composables/i18n"
-import { GQLError } from "~/helpers/backend/GQLClient"
 import { useReadonlyStream, useStream } from "~/composables/stream"
+import { invokeAction } from "~/helpers/actions"
+import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
+import { getEnvActionErrorMessage } from "~/helpers/error-messages"
+import { TeamEnvironment } from "~/helpers/teams/TeamEnvironment"
+import TeamEnvironmentAdapter from "~/helpers/teams/TeamEnvironmentAdapter"
+import {
+  sortPersonalEnvironmentsAlphabetically,
+  sortTeamEnvironmentsAlphabetically,
+} from "~/helpers/utils/sortEnvironmentsAlphabetically"
 import {
   environments$,
   globalEnv$,
   selectedEnvironmentIndex$,
   setSelectedEnvironmentIndex,
 } from "~/newstore/environments"
-import TeamEnvironmentAdapter from "~/helpers/teams/TeamEnvironmentAdapter"
-import { useColorMode } from "@composables/theming"
-import { breakpointsTailwind, useBreakpoints } from "@vueuse/core"
-import { invokeAction } from "~/helpers/actions"
-import { TeamEnvironment } from "~/helpers/teams/TeamEnvironment"
-import { Environment } from "@hoppscotch/data"
-import { onMounted } from "vue"
 import { useLocalState } from "~/newstore/localstate"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
-import { useService } from "dioc/vue"
 import { WorkspaceService } from "~/services/workspace.service"
+import IconCheck from "~icons/lucide/check"
+import IconEdit from "~icons/lucide/edit"
+import IconEye from "~icons/lucide/eye"
+import IconGlobe from "~icons/lucide/globe"
+import IconLayers from "~icons/lucide/layers"
 
 type Scope =
   | {
@@ -341,6 +396,8 @@ const colorMode = useColorMode()
 
 type EnvironmentType = "my-environments" | "team-environments"
 
+const filterText = ref("")
+
 const myEnvironments = useReadonlyStream(environments$, [])
 
 const workspaceService = useService(WorkspaceService)
@@ -358,6 +415,7 @@ const switchToTeamWorkspace = (team: GetMyTeamsQuery["myTeams"][number]) => {
     teamID: team.id,
     teamName: team.name,
     type: "team",
+    role: team.myRole,
   })
 }
 watch(
@@ -381,6 +439,45 @@ const teamEnvironmentList = useReadonlyStream(
   teamEnvListAdapter.teamEnvironmentList$,
   []
 )
+
+// Sort environments alphabetically by default and filter based on search
+const filteredAndAlphabetizedPersonalEnvs = computed(() => {
+  const envs = sortPersonalEnvironmentsAlphabetically(
+    myEnvironments.value,
+    "asc"
+  )
+
+  if (selectedEnvTab.value !== "my-environments" || !filterText.value)
+    return envs
+
+  // Ensure specifying whitespace characters alone result in the empty state for no search results
+  const trimmedFilterText = filterText.value.trim().toLowerCase()
+
+  return envs.filter(({ env }) =>
+    trimmedFilterText
+      ? env.name.toLowerCase().includes(trimmedFilterText)
+      : false
+  )
+})
+
+const filteredAndAlphabetizedTeamEnvs = computed(() => {
+  const envs = sortTeamEnvironmentsAlphabetically(
+    teamEnvironmentList.value,
+    "asc"
+  )
+
+  if (selectedEnvTab.value !== "team-environments" || !filterText.value)
+    return envs
+
+  // Ensure specifying whitespace characters alone result in the empty state for no search results
+  const trimmedFilterText = filterText.value.trim().toLowerCase()
+
+  return envs.filter(({ env }) =>
+    trimmedFilterText
+      ? env.environment.name.toLowerCase().includes(trimmedFilterText)
+      : false
+  )
+})
 
 const handleEnvironmentChange = (
   index: number,
@@ -479,15 +576,20 @@ const selectedEnv = computed(() => {
         type: "MY_ENV",
         index: props.modelValue.index,
         name: props.modelValue.environment?.name,
+        variables: props.modelValue.environment?.variables,
       }
     } else if (props.modelValue?.type === "team-environment") {
       return {
         type: "TEAM_ENV",
         name: props.modelValue.environment.environment.name,
         teamEnvID: props.modelValue.environment.id,
+        variables: props.modelValue.environment.environment.variables,
       }
     }
-    return { type: "global", name: "Global" }
+    return {
+      type: "global",
+      name: "Global",
+    }
   }
   if (selectedEnvironmentIndex.value.type === "MY_ENV") {
     const environment =
@@ -560,19 +662,7 @@ onMounted(() => {
 const envSelectorActions = ref<TippyComponent | null>(null)
 const envQuickPeekActions = ref<TippyComponent | null>(null)
 
-const getErrorMessage = (err: GQLError<string>) => {
-  if (err.type === "network_error") {
-    return t("error.network_error")
-  }
-  switch (err.error) {
-    case "team_environment/not_found":
-      return t("team_environment.not_found")
-    default:
-      return t("error.something_went_wrong")
-  }
-}
-
-const globalEnvs = useReadonlyStream(globalEnv$, [])
+const globalEnvs = useReadonlyStream(globalEnv$, {} as GlobalEnvironment)
 
 const environmentVariables = computed(() => {
   if (selectedEnv.value.variables) {
@@ -582,10 +672,16 @@ const environmentVariables = computed(() => {
 })
 
 const editGlobalEnv = () => {
-  invokeAction("modals.my.environment.edit", {
-    envName: "Global",
-  })
+  invokeAction("modals.global.environment.update", {})
 }
+
+// Filter input disabled if no environments are available
+const isFilterInputDisabled = computed(() => {
+  if (selectedEnvTab.value === "my-environments") {
+    return myEnvironments.value.length === 0
+  }
+  return teamEnvironmentList.value.length === 0
+})
 
 const editEnv = () => {
   if (selectedEnv.value.type === "MY_ENV" && selectedEnv.value.name) {

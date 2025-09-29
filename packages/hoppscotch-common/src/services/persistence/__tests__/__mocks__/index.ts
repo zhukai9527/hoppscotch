@@ -1,9 +1,15 @@
-import { Environment, HoppCollection } from "@hoppscotch/data"
+import {
+  Environment,
+  GlobalEnvironment,
+  HoppCollection,
+  RESTReqSchemaVersion,
+} from "@hoppscotch/data"
 
 import { HoppGQLDocument } from "~/helpers/graphql/document"
-import { HoppRESTDocument } from "~/helpers/rest/document"
+import { HoppRequestDocument } from "~/helpers/rest/document"
 import { GQLHistoryEntry, RESTHistoryEntry } from "~/newstore/history"
 import { SettingsDef, getDefaultSettings } from "~/newstore/settings"
+import { SecretVariable } from "~/services/secret-environment.service"
 import { PersistableTabState } from "~/services/tab"
 
 type VUEX_DATA = {
@@ -19,56 +25,79 @@ const DEFAULT_SETTINGS = getDefaultSettings()
 
 export const REST_COLLECTIONS_MOCK: HoppCollection[] = [
   {
-    v: 1,
+    v: 7,
     name: "Echo",
-    folders: [],
     requests: [
       {
-        v: "1",
-        endpoint: "https://echo.hoppscotch.io",
+        v: RESTReqSchemaVersion,
         name: "Echo test",
+        method: "GET",
+        endpoint: "https://echo.hoppscotch.io",
         params: [],
         headers: [],
-        method: "GET",
-        auth: { authType: "none", authActive: true },
         preRequestScript: "",
         testScript: "",
-        body: { contentType: null, body: null },
+        auth: {
+          authType: "none",
+          authActive: true,
+        },
+        body: {
+          contentType: null,
+          body: null,
+        },
+        requestVariables: [],
+        responses: {},
       },
     ],
+    auth: { authType: "none", authActive: true },
+    headers: [],
+    folders: [],
   },
 ]
 
 export const GQL_COLLECTIONS_MOCK: HoppCollection[] = [
   {
-    v: 1,
+    v: 7,
     name: "Echo",
-    folders: [],
     requests: [
       {
-        v: 2,
+        v: 8,
         name: "Echo test",
         url: "https://echo.hoppscotch.io/graphql",
         headers: [],
-        variables: '{\n  "id": "1"\n}',
         query: "query Request { url }",
-        auth: { authType: "none", authActive: true },
+        variables: '{\n  "id": "1"\n}',
+        auth: {
+          authType: "none",
+          authActive: true,
+        },
       },
     ],
+    auth: { authType: "none", authActive: true },
+    headers: [],
+    folders: [],
   },
 ]
 
 export const ENVIRONMENTS_MOCK: Environment[] = [
   {
+    v: 1,
+    id: "ENV_1",
     name: "globals",
     variables: [
       {
         key: "test-global-key",
         value: "test-global-value",
+        secret: false,
       },
     ],
   },
-  { name: "Test", variables: [{ key: "test-key", value: "test-value" }] },
+  {
+    v: 1,
+    id: "ENV_2",
+    name: "Test",
+    variables: [{ key: "test-key", value: "test-value", secret: false }],
+  },
 ]
 
 export const SELECTED_ENV_INDEX_MOCK = {
@@ -97,9 +126,10 @@ export const MQTT_REQUEST_MOCK = {
   clientID: "hoppscotch",
 }
 
-export const GLOBAL_ENV_MOCK: Environment["variables"] = [
-  { key: "test-key", value: "test-value" },
-]
+export const GLOBAL_ENV_MOCK: GlobalEnvironment = {
+  v: 1,
+  variables: [{ key: "test-key", value: "test-value", secret: false }],
+}
 
 export const VUEX_DATA_MOCK: VUEX_DATA = {
   postwoman: {
@@ -123,7 +153,9 @@ export const REST_HISTORY_MOCK: RESTHistoryEntry[] = [
       params: [],
       preRequestScript: "",
       testScript: "",
-      v: "1",
+      requestVariables: [],
+      v: RESTReqSchemaVersion,
+      responses: {},
     },
     responseMeta: { duration: 807, statusCode: 200 },
     star: false,
@@ -135,7 +167,7 @@ export const GQL_HISTORY_MOCK: GQLHistoryEntry[] = [
   {
     v: 1,
     request: {
-      v: 2,
+      v: 8,
       name: "Untitled",
       url: "https://echo.hoppscotch.io/graphql",
       query: "query Request { url }",
@@ -156,7 +188,7 @@ export const GQL_TAB_STATE_MOCK: PersistableTabState<HoppGQLDocument> = {
       tabID: "5edbe8d4-65c9-4381-9354-5f1bf05d8ccc",
       doc: {
         request: {
-          v: 2,
+          v: 8,
           name: "Untitled",
           url: "https://echo.hoppscotch.io/graphql",
           headers: [],
@@ -172,14 +204,14 @@ export const GQL_TAB_STATE_MOCK: PersistableTabState<HoppGQLDocument> = {
   ],
 }
 
-export const REST_TAB_STATE_MOCK: PersistableTabState<HoppRESTDocument> = {
+export const REST_TAB_STATE_MOCK: PersistableTabState<HoppRequestDocument> = {
   lastActiveTabID: "e6e8d800-caa8-44a2-a6a6-b4765a3167aa",
   orderedDocs: [
     {
       tabID: "e6e8d800-caa8-44a2-a6a6-b4765a3167aa",
       doc: {
         request: {
-          v: "1",
+          v: RESTReqSchemaVersion,
           endpoint: "https://echo.hoppscotch.io",
           name: "Echo test",
           params: [],
@@ -189,8 +221,11 @@ export const REST_TAB_STATE_MOCK: PersistableTabState<HoppRESTDocument> = {
           preRequestScript: "",
           testScript: "",
           body: { contentType: null, body: null },
+          requestVariables: [],
+          responses: {},
         },
         isDirty: false,
+        type: "request",
         saveContext: {
           originLocation: "user-collection",
           folderPath: "0",
@@ -198,6 +233,16 @@ export const REST_TAB_STATE_MOCK: PersistableTabState<HoppRESTDocument> = {
         },
         response: null,
       },
+    },
+  ],
+}
+
+export const SECRET_ENVIRONMENTS_MOCK: Record<string, SecretVariable[]> = {
+  clryz7ir7002al4162bsj0azg: [
+    {
+      key: "test-key",
+      value: "test-value",
+      varIndex: 1,
     },
   ],
 }

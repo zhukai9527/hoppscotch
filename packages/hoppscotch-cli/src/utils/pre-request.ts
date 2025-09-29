@@ -1,5 +1,6 @@
 import {
   Environment,
+  EnvironmentVariable,
   HoppRESTRequest,
   parseBodyEnvVariablesE,
   parseRawKeyValueEntriesE,
@@ -15,6 +16,7 @@ import * as TE from "fp-ts/TaskEither";
 import { flow, pipe } from "fp-ts/function";
 import * as S from "fp-ts/string";
 import qs from "qs";
+import { AwsV4Signer } from "aws4fetch";
 
 import { EffectiveHoppRESTRequest } from "../interfaces/request";
 import { HoppCLIError, error } from "../types/errors";
@@ -22,8 +24,15 @@ import { HoppEnvs } from "../types/request";
 import { PreRequestMetrics } from "../types/response";
 import { isHoppCLIError } from "./checks";
 import { arrayFlatMap, arraySort, tupleToRecord } from "./functions/array";
-import { getEffectiveFinalMetaData } from "./getters";
+import { getEffectiveFinalMetaData, getResolvedVariables } from "./getters";
 import { toFormData } from "./mutators";
+import {
+  DigestAuthParams,
+  fetchInitialDigestAuthInfo,
+  generateDigestAuthHeader,
+} from "./auth/digest";
+
+import { calculateHawkHeader } from "@hoppscotch/data";
 
 /**
  * Runs pre-request-script runner over given request which extracts set ENVs and
@@ -36,7 +45,10 @@ import { toFormData } from "./mutators";
 export const preRequestScriptRunner = (
   request: HoppRESTRequest,
   envs: HoppEnvs
-): TE.TaskEither<HoppCLIError, EffectiveHoppRESTRequest> =>
+): TE.TaskEither<
+  HoppCLIError,
+  { effectiveRequest: EffectiveHoppRESTRequest } & { updatedEnvs: HoppEnvs }
+> =>
   pipe(
     TE.of(request),
     TE.chain(({ preRequestScript }) =>
@@ -44,9 +56,18 @@ export const preRequestScriptRunner = (
     ),
     TE.map(
       ({ selected, global }) =>
-        <Environment>{ name: "Env", variables: [...selected, ...global] }
+        <Environment>{
+          name: "Env",
+          variables: [...(selected ?? []), ...(global ?? [])],
+        }
     ),
-    TE.chainEitherKW((env) => getEffectiveRESTRequest(request, env)),
+    TE.chainW((env) =>
+      TE.tryCatch(
+        () => getEffectiveRESTRequest(request, env),
+        (reason) => error({ code: "PRE_REQUEST_SCRIPT_ERROR", data: reason })
+      )
+    ),
+    TE.chainEitherKW((effectiveRequest) => effectiveRequest),
     TE.mapLeft((reason) =>
       isHoppCLIError(reason)
         ? reason
@@ -65,16 +86,26 @@ export const preRequestScriptRunner = (
  *
  * @returns An object with extra fields defining a complete request
  */
-export function getEffectiveRESTRequest(
+export async function getEffectiveRESTRequest(
   request: HoppRESTRequest,
   environment: Environment
-): E.Either<HoppCLIError, EffectiveHoppRESTRequest> {
+): Promise<
+  E.Either<
+    HoppCLIError,
+    { effectiveRequest: EffectiveHoppRESTRequest } & { updatedEnvs: HoppEnvs }
+  >
+> {
   const envVariables = environment.variables;
+
+  const resolvedVariables = getResolvedVariables(
+    request.requestVariables,
+    envVariables
+  );
 
   // Parsing final headers with applied ENVs.
   const _effectiveFinalHeaders = getEffectiveFinalMetaData(
     request.headers,
-    environment
+    resolvedVariables
   );
   if (E.isLeft(_effectiveFinalHeaders)) {
     return _effectiveFinalHeaders;
@@ -84,73 +115,241 @@ export function getEffectiveRESTRequest(
   // Parsing final parameters with applied ENVs.
   const _effectiveFinalParams = getEffectiveFinalMetaData(
     request.params,
-    environment
+    resolvedVariables
   );
   if (E.isLeft(_effectiveFinalParams)) {
     return _effectiveFinalParams;
   }
   const effectiveFinalParams = _effectiveFinalParams.right;
 
+  // Parsing final-body with applied ENVs.
+  const _effectiveFinalBody = getFinalBodyFromRequest(
+    request,
+    resolvedVariables
+  );
+  if (E.isLeft(_effectiveFinalBody)) {
+    return _effectiveFinalBody;
+  }
+
   // Authentication
   if (request.auth.authActive) {
     // TODO: Support a better b64 implementation than btoa ?
     if (request.auth.authType === "basic") {
-      const username = parseTemplateString(request.auth.username, envVariables);
-      const password = parseTemplateString(request.auth.password, envVariables);
+      const username = parseTemplateString(
+        request.auth.username,
+        resolvedVariables
+      );
+      const password = parseTemplateString(
+        request.auth.password,
+        resolvedVariables
+      );
 
       effectiveFinalHeaders.push({
         active: true,
         key: "Authorization",
         value: `Basic ${btoa(`${username}:${password}`)}`,
+        description: "",
       });
-    } else if (
-      request.auth.authType === "bearer" ||
-      request.auth.authType === "oauth-2"
-    ) {
+    } else if (request.auth.authType === "bearer") {
       effectiveFinalHeaders.push({
         active: true,
         key: "Authorization",
-        value: `Bearer ${parseTemplateString(
-          request.auth.token,
-          envVariables
-        )}`,
+        value: `Bearer ${parseTemplateString(request.auth.token, resolvedVariables)}`,
+        description: "",
       });
-    } else if (request.auth.authType === "api-key") {
-      const { key, value, addTo } = request.auth;
-      if (addTo === "Headers") {
+    } else if (request.auth.authType === "oauth-2") {
+      const { addTo } = request.auth;
+
+      if (addTo === "HEADERS") {
         effectiveFinalHeaders.push({
           active: true,
-          key: parseTemplateString(key, envVariables),
-          value: parseTemplateString(value, envVariables),
+          key: "Authorization",
+          value: `Bearer ${parseTemplateString(request.auth.grantTypeInfo.token, resolvedVariables)}`,
+          description: "",
         });
-      } else if (addTo === "Query params") {
+      } else if (addTo === "QUERY_PARAMS") {
         effectiveFinalParams.push({
           active: true,
-          key: parseTemplateString(key, envVariables),
-          value: parseTemplateString(value, envVariables),
+          key: "access_token",
+          value: parseTemplateString(
+            request.auth.grantTypeInfo.token,
+            resolvedVariables
+          ),
+          description: "",
         });
       }
+    } else if (request.auth.authType === "api-key") {
+      const { key, value, addTo } = request.auth;
+      if (addTo === "HEADERS") {
+        effectiveFinalHeaders.push({
+          active: true,
+          key: parseTemplateString(key, resolvedVariables),
+          value: parseTemplateString(value, resolvedVariables),
+          description: "",
+        });
+      } else if (addTo === "QUERY_PARAMS") {
+        effectiveFinalParams.push({
+          active: true,
+          key: parseTemplateString(key, resolvedVariables),
+          value: parseTemplateString(value, resolvedVariables),
+          description: "",
+        });
+      }
+    } else if (request.auth.authType === "aws-signature") {
+      const { addTo } = request.auth;
+
+      const currentDate = new Date();
+      const amzDate = currentDate.toISOString().replace(/[:-]|\.\d{3}/g, "");
+      const { method, endpoint } = request;
+
+      const signer = new AwsV4Signer({
+        method,
+        datetime: amzDate,
+        signQuery: addTo === "QUERY_PARAMS",
+        accessKeyId: parseTemplateString(
+          request.auth.accessKey,
+          resolvedVariables
+        ),
+        secretAccessKey: parseTemplateString(
+          request.auth.secretKey,
+          resolvedVariables
+        ),
+        region:
+          parseTemplateString(request.auth.region, resolvedVariables) ??
+          "us-east-1",
+        service: parseTemplateString(
+          request.auth.serviceName,
+          resolvedVariables
+        ),
+        url: parseTemplateString(endpoint, resolvedVariables),
+        sessionToken:
+          request.auth.serviceToken &&
+          parseTemplateString(request.auth.serviceToken, resolvedVariables),
+      });
+
+      const sign = await signer.sign();
+
+      if (addTo === "HEADERS") {
+        sign.headers.forEach((value, key) => {
+          effectiveFinalHeaders.push({
+            active: true,
+            key,
+            value,
+            description: "",
+          });
+        });
+      } else if (addTo === "QUERY_PARAMS") {
+        sign.url.searchParams.forEach((value, key) => {
+          effectiveFinalParams.push({
+            active: true,
+            key,
+            value,
+            description: "",
+          });
+        });
+      }
+    } else if (request.auth.authType === "digest") {
+      const { method, endpoint } = request as HoppRESTRequest;
+
+      // Step 1: Fetch the initial auth info (nonce, realm, etc.)
+      const authInfo = await fetchInitialDigestAuthInfo(
+        parseTemplateString(endpoint, resolvedVariables),
+        method,
+        request.auth.disableRetry
+      );
+
+      // Step 2: Set up the parameters for the digest authentication header
+      const digestAuthParams: DigestAuthParams = {
+        username: parseTemplateString(request.auth.username, resolvedVariables),
+        password: parseTemplateString(request.auth.password, resolvedVariables),
+        realm: request.auth.realm
+          ? parseTemplateString(request.auth.realm, resolvedVariables)
+          : authInfo.realm,
+        nonce: request.auth.nonce
+          ? parseTemplateString(authInfo.nonce, resolvedVariables)
+          : authInfo.nonce,
+        endpoint: parseTemplateString(endpoint, resolvedVariables),
+        method,
+        algorithm: request.auth.algorithm ?? authInfo.algorithm,
+        qop: request.auth.qop
+          ? parseTemplateString(request.auth.qop, resolvedVariables)
+          : authInfo.qop,
+        opaque: request.auth.opaque
+          ? parseTemplateString(request.auth.opaque, resolvedVariables)
+          : authInfo.opaque,
+        reqBody: typeof request.body.body === "string" ? request.body.body : "",
+      };
+
+      // Step 3: Generate the Authorization header
+      const authHeaderValue = await generateDigestAuthHeader(digestAuthParams);
+
+      effectiveFinalHeaders.push({
+        active: true,
+        key: "Authorization",
+        value: authHeaderValue,
+        description: "",
+      });
+    } else if (request.auth.authType === "hawk") {
+      const { method, endpoint } = request;
+
+      const hawkHeader = await calculateHawkHeader({
+        url: parseTemplateString(endpoint, resolvedVariables), // URL
+        method: method, // HTTP method
+        id: parseTemplateString(request.auth.authId, resolvedVariables),
+        key: parseTemplateString(request.auth.authKey, resolvedVariables),
+        algorithm: request.auth.algorithm,
+
+        // advanced parameters (optional)
+        includePayloadHash: request.auth.includePayloadHash,
+        nonce: request.auth.nonce
+          ? parseTemplateString(request.auth.nonce, resolvedVariables)
+          : undefined,
+        ext: request.auth.ext
+          ? parseTemplateString(request.auth.ext, resolvedVariables)
+          : undefined,
+        app: request.auth.app
+          ? parseTemplateString(request.auth.app, resolvedVariables)
+          : undefined,
+        dlg: request.auth.dlg
+          ? parseTemplateString(request.auth.dlg, resolvedVariables)
+          : undefined,
+        timestamp: request.auth.timestamp
+          ? parseInt(
+              parseTemplateString(request.auth.timestamp, resolvedVariables),
+              10
+            )
+          : undefined,
+      });
+
+      effectiveFinalHeaders.push({
+        active: true,
+        key: "Authorization",
+        value: hawkHeader,
+        description: "",
+      });
     }
   }
 
-  // Parsing final-body with applied ENVs.
-  const _effectiveFinalBody = getFinalBodyFromRequest(request, envVariables);
-  if (E.isLeft(_effectiveFinalBody)) {
-    return _effectiveFinalBody;
-  }
   const effectiveFinalBody = _effectiveFinalBody.right;
 
-  if (request.body.contentType)
+  if (
+    request.body.contentType &&
+    !effectiveFinalHeaders.some(
+      ({ key }) => key.toLowerCase() === "content-type"
+    )
+  ) {
     effectiveFinalHeaders.push({
       active: true,
-      key: "content-type",
+      key: "Content-Type",
       value: request.body.contentType,
+      description: "",
     });
+  }
 
-  // Parsing final-endpoint with applied ENVs.
+  // Parsing final-endpoint with applied ENVs (environment + request variables).
   const _effectiveFinalURL = parseTemplateStringE(
     request.endpoint,
-    envVariables
+    resolvedVariables
   );
   if (E.isLeft(_effectiveFinalURL)) {
     return E.left(
@@ -162,12 +361,30 @@ export function getEffectiveRESTRequest(
   }
   const effectiveFinalURL = _effectiveFinalURL.right;
 
+  // Secret environment variables referenced in the request endpoint should be masked
+  let effectiveFinalDisplayURL;
+  if (envVariables.some(({ secret }) => secret)) {
+    const _effectiveFinalDisplayURL = parseTemplateStringE(
+      request.endpoint,
+      resolvedVariables,
+      true
+    );
+
+    if (E.isRight(_effectiveFinalDisplayURL)) {
+      effectiveFinalDisplayURL = _effectiveFinalDisplayURL.right;
+    }
+  }
+
   return E.right({
-    ...request,
-    effectiveFinalURL,
-    effectiveFinalHeaders,
-    effectiveFinalParams,
-    effectiveFinalBody,
+    effectiveRequest: {
+      ...request,
+      effectiveFinalURL,
+      effectiveFinalDisplayURL,
+      effectiveFinalHeaders,
+      effectiveFinalParams,
+      effectiveFinalBody,
+    },
+    updatedEnvs: { global: [], selected: resolvedVariables },
   });
 }
 
@@ -175,15 +392,15 @@ export function getEffectiveRESTRequest(
  * Replaces template variables in request's body from the given set of ENVs,
  * to generate final request body without any template variables.
  * @param request Provides request's body, on which ENVs has to be applied.
- * @param envVariables Provides set of key-value pairs (environment variables),
+ * @param resolvedVariables Provides set of key-value pairs (request + environment variables),
  * used to parse-out template variables.
  * @returns Final request body without any template variables as value.
  * Or, HoppCLIError in case of error while parsing.
  */
 function getFinalBodyFromRequest(
   request: HoppRESTRequest,
-  envVariables: Environment["variables"]
-): E.Either<HoppCLIError, string | null | FormData> {
+  resolvedVariables: EnvironmentVariable[]
+): E.Either<HoppCLIError, string | null | FormData | File> {
   if (request.body.contentType === null) {
     return E.right(null);
   }
@@ -206,8 +423,8 @@ function getFinalBodyFromRequest(
            * which will be resolved in further steps.
            */
           A.map(({ key, value }) => [
-            parseTemplateStringE(key, envVariables),
-            parseTemplateStringE(value, envVariables),
+            parseTemplateStringE(key, resolvedVariables),
+            parseTemplateStringE(value, resolvedVariables),
           ]),
 
           /**
@@ -243,13 +460,15 @@ function getFinalBodyFromRequest(
       arrayFlatMap((x) =>
         x.isFile
           ? x.value.map((v) => ({
-              key: parseTemplateString(x.key, envVariables),
+              key: parseTemplateString(x.key, resolvedVariables),
               value: v as string | Blob,
+              contentType: x.contentType,
             }))
           : [
               {
-                key: parseTemplateString(x.key, envVariables),
-                value: parseTemplateString(x.value, envVariables),
+                key: parseTemplateString(x.key, resolvedVariables),
+                value: parseTemplateString(x.value, resolvedVariables),
+                contentType: x.contentType,
               },
             ]
       ),
@@ -258,8 +477,22 @@ function getFinalBodyFromRequest(
     );
   }
 
+  if (request.body.contentType === "application/octet-stream") {
+    const body = request.body.body;
+
+    if (!body) {
+      return E.right(null);
+    }
+
+    if (!(body instanceof File)) {
+      return E.right(null);
+    }
+
+    return E.right(body);
+  }
+
   return pipe(
-    parseBodyEnvVariablesE(request.body.body, envVariables),
+    parseBodyEnvVariablesE(request.body.body, resolvedVariables),
     E.mapLeft((e) =>
       error({
         code: "PARSING_ERROR",

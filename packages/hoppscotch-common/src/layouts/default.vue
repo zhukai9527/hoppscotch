@@ -57,6 +57,14 @@
       @hide-modal="showSupport = false"
     />
     <AppOptions v-else :show="showSupport" @hide-modal="showSupport = false" />
+
+    <!-- Let additional stuff be registered -->
+    <template
+      v-for="(component, index) in rootExtensionComponents"
+      :key="index"
+    >
+      <component :is="component" />
+    </template>
   </div>
 </template>
 
@@ -69,13 +77,16 @@ import "splitpanes/dist/splitpanes.css"
 import { computed, onBeforeMount, onMounted, ref, watch } from "vue"
 import { RouterView, useRouter } from "vue-router"
 
-import { defineActionHandler } from "~/helpers/actions"
-import { hookKeybindingsListener } from "~/helpers/keybindings"
-import { applySetting } from "~/newstore/settings"
-import { useToast } from "~/composables/toast"
 import { useI18n } from "~/composables/i18n"
+import { useToast } from "~/composables/toast"
+import { InvocationTriggers, defineActionHandler } from "~/helpers/actions"
+import { hookKeybindingsListener } from "~/helpers/keybindings"
+import { applySetting, toggleSetting } from "~/newstore/settings"
 import { platform } from "~/platform"
+import { HoppSpotlightSessionEventData } from "~/platform/analytics"
 import { PersistenceService } from "~/services/persistence"
+import { SpotlightService } from "~/services/spotlight"
+import { UIExtensionService } from "~/services/ui-extension.service"
 
 const router = useRouter()
 
@@ -93,6 +104,12 @@ const toast = useToast()
 const t = useI18n()
 
 const persistenceService = useService(PersistenceService)
+const spotlightService = useService(SpotlightService)
+const uiExtensionService = useService(UIExtensionService)
+
+const rootExtensionComponents = uiExtensionService.rootUIExtensionComponents
+
+const HAS_OPENED_SPOTLIGHT = useSetting("HAS_OPENED_SPOTLIGHT")
 
 onBeforeMount(() => {
   if (!mdAndLarger.value) {
@@ -101,9 +118,9 @@ onBeforeMount(() => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   const cookiesAllowed =
-    persistenceService.getLocalConfig("cookiesAllowed") === "yes"
+    (await persistenceService.getLocalConfig("cookiesAllowed")) === "yes"
   const platformAllowsCookiePrompts =
     platform.platformFeatureFlags.promptAsUsingCookies ?? true
 
@@ -113,8 +130,8 @@ onMounted(() => {
       action: [
         {
           text: `${t("action.learn_more")}`,
-          onClick: (_, toastObject) => {
-            persistenceService.setLocalConfig("cookiesAllowed", "yes")
+          onClick: async (_, toastObject) => {
+            await persistenceService.setLocalConfig("cookiesAllowed", "yes")
             toastObject.goAway(0)
             window
               .open("https://docs.hoppscotch.io/support/privacy", "_blank")
@@ -123,8 +140,8 @@ onMounted(() => {
         },
         {
           text: `${t("action.dismiss")}`,
-          onClick: (_, toastObject) => {
-            persistenceService.setLocalConfig("cookiesAllowed", "yes")
+          onClick: async (_, toastObject) => {
+            await persistenceService.setLocalConfig("cookiesAllowed", "yes")
             toastObject.goAway(0)
           },
         },
@@ -144,8 +161,20 @@ const spacerClass = computed(() =>
   expandNavigation.value ? "spacer-small" : "spacer-expand"
 )
 
-defineActionHandler("modals.search.toggle", () => {
+defineActionHandler("modals.search.toggle", (_, trigger) => {
+  const triggerMethodMap: Record<
+    InvocationTriggers,
+    HoppSpotlightSessionEventData["method"]
+  > = {
+    keypress: "keyboard-shortcut",
+    mouseclick: "click-spotlight-bar",
+  }
+  spotlightService.setAnalyticsData({
+    method: triggerMethodMap[trigger as InvocationTriggers],
+  })
+
   showSearch.value = !showSearch.value
+  !HAS_OPENED_SPOTLIGHT.value && toggleSetting("HAS_OPENED_SPOTLIGHT")
 })
 
 defineActionHandler("modals.support.toggle", () => {

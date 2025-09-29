@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Hoppscotch",
-    "version": "23.12.1-1"
+    "version": "25.1.1"
   },
   "tauri": {
     "allowlist": {
@@ -49,16 +49,18 @@
       "targets": "all"
     },
     "security": {
-      "csp": "none"
+      "csp": null
     },
     "updater": {
       "active": false
     },
     "windows": [
       {
+        "label": "main",
+        "title": "Hoppscotch",
+        "visible": false,
         "fullscreen": false,
         "resizable": true,
-        "title": "Hoppscotch",
         "width": 800,
         "height": 600,
         "fileDropEnabled": false

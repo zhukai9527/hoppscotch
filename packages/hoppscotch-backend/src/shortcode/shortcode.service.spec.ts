@@ -48,6 +48,8 @@ const user: AuthUser = {
   photoURL: 'https://en.wikipedia.org/wiki/Dwight_Schrute',
   isAdmin: false,
   refreshToken: 'hbfvdkhjbvkdvdfjvbnkhjb',
+  lastLoggedOn: createdOn,
+  lastActiveOn: createdOn,
   createdOn: createdOn,
   currentGQLSession: {},
   currentRESTSession: {},
@@ -544,10 +546,12 @@ describe('ShortcodeService', () => {
       );
       expect(result).toEqual(<ShortcodeWithUserEmail[]>[
         {
-          id: shortcodes[1].id,
-          request: JSON.stringify(shortcodes[1].request),
-          properties: JSON.stringify(shortcodes[1].embedProperties),
-          createdOn: shortcodes[1].createdOn,
+          id: shortcodesWithUserEmail[1].id,
+          request: JSON.stringify(shortcodesWithUserEmail[1].request),
+          properties: JSON.stringify(
+            shortcodesWithUserEmail[1].embedProperties,
+          ),
+          createdOn: shortcodesWithUserEmail[1].createdOn,
           creator: {
             uid: user.uid,
             email: user.email,

@@ -59,6 +59,7 @@ export const baseTheme = EditorView.theme({
     backgroundColor: "var(--accent-dark-color)",
     color: "var(--accent-contrast-color)",
     borderRadius: "2px",
+    opacity: "0.4",
   },
   ".cm-panels": {
     backgroundColor: "var(--primary-light-color)",
@@ -170,9 +171,6 @@ export const baseTheme = EditorView.theme({
   },
   ".cm-activeLineGutter": {
     backgroundColor: "transparent",
-  },
-  ".cm-scroller::-webkit-scrollbar": {
-    display: "none",
   },
   ".cm-foldPlaceholder": {
     backgroundColor: "var(--divider-light-color)",
@@ -320,9 +318,6 @@ export const inputTheme = EditorView.theme({
   ".cm-activeLineGutter": {
     backgroundColor: "transparent",
   },
-  ".cm-scroller::-webkit-scrollbar": {
-    display: "none",
-  },
   ".cm-foldPlaceholder": {
     backgroundColor: "var(--divider-light-color)",
     color: "var(--secondary-dark-color)",
@@ -382,7 +377,10 @@ export const baseHighlightStyle = HighlightStyle.define([
     ],
     color: editorOperatorColor,
   },
-  { tag: [t.meta, t.comment], color: editorMetaColor },
+  {
+    tag: [t.meta, t.comment],
+    color: editorMetaColor,
+  },
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },

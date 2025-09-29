@@ -10,10 +10,18 @@
         <div class="mb-8 flex max-w-md flex-col items-center justify-center">
           <icon-lucide-users class="h-6 w-6 text-accent" />
           <h3 class="my-2 text-center text-lg">
-            {{ t("team.we_sent_invite_link") }}
+            {{
+              inviteMethod === "email"
+                ? t("team.we_sent_invite_link")
+                : t("team.invite_sent_smtp_disabled")
+            }}
           </h3>
           <p class="text-center">
-            {{ t("team.we_sent_invite_link_description") }}
+            {{
+              inviteMethod === "email"
+                ? t("team.we_sent_invite_link_description")
+                : t("team.invite_sent_smtp_disabled_description")
+            }}
           </p>
         </div>
         <div v-if="successInvites.length">
@@ -26,13 +34,28 @@
             <div
               v-for="(invitee, index) in successInvites"
               :key="`invitee-${index}`"
+              class="flex items-center"
             >
-              <p class="flex items-center">
+              <p class="flex items-center flex-1">
                 <component
                   :is="IconMailCheck"
                   class="svg-icons mr-4 text-green-500"
                 />
                 <span class="truncate">{{ invitee.email }}</span>
+                <span class="flex items-center gap-1 ml-auto">
+                  <HoppButtonSecondary
+                    outline
+                    filled
+                    :icon="getCopyIcon(invitee.invitationID).value"
+                    class="rounded-md"
+                    :label="t('team.copy_invite_link')"
+                    @click="
+                      () => {
+                        copyInviteLink(invitee.invitationID)
+                      }
+                    "
+                  />
+                </span>
               </p>
             </div>
           </div>
@@ -47,6 +70,7 @@
             <div
               v-for="(invitee, index) in failedInvites"
               :key="`invitee-${index}`"
+              class="flex flex-col"
             >
               <p class="flex items-center">
                 <component
@@ -55,7 +79,7 @@
                 />
                 <span class="truncate">{{ invitee.email }}</span>
               </p>
-              <p class="ml-8 mt-2 text-red-500">
+              <p class="ml-8 mt-1 text-secondaryLight text-tiny">
                 {{ getErrorMessage(invitee.error) }}
               </p>
             </div>
@@ -107,6 +131,20 @@
                   :value="invitee.inviteeRole"
                   readonly
                 />
+                <div class="flex">
+                  <HoppButtonSecondary
+                    v-tippy="{ theme: 'tooltip' }"
+                    outline
+                    :icon="getCopyIcon(invitee.id).value"
+                    class="rounded-md"
+                    :title="t('team.copy_invite_link')"
+                    @click="
+                      () => {
+                        copyInviteLink(invitee.id)
+                      }
+                    "
+                  />
+                </div>
                 <div class="flex">
                   <HoppButtonSecondary
                     v-tippy="{ theme: 'tooltip' }"
@@ -352,41 +390,58 @@
 </template>
 
 <script setup lang="ts">
-import { watch, ref, reactive, computed } from "vue"
-import * as T from "fp-ts/Task"
-import * as E from "fp-ts/Either"
+import { useGQLQuery } from "@composables/graphql"
 import * as A from "fp-ts/Array"
+import * as E from "fp-ts/Either"
 import * as O from "fp-ts/Option"
+import * as T from "fp-ts/Task"
 import { flow, pipe } from "fp-ts/function"
-import { Email, EmailCodec } from "../../helpers/backend/types/Email"
+import { computed, onMounted, reactive, ref, Ref, watch } from "vue"
+import { GQLError } from "~/helpers/backend/GQLClient"
 import {
-  TeamInvitationAddedDocument,
-  TeamInvitationRemovedDocument,
-  TeamMemberRole,
   GetPendingInvitesDocument,
   GetPendingInvitesQuery,
   GetPendingInvitesQueryVariables,
+  TeamInvitationAddedDocument,
+  TeamInvitationRemovedDocument,
+  TeamMemberRole,
 } from "../../helpers/backend/graphql"
 import {
   createTeamInvitation,
   CreateTeamInvitationErrors,
   revokeTeamInvitation,
 } from "../../helpers/backend/mutations/TeamInvitation"
-import { GQLError } from "~/helpers/backend/GQLClient"
-import { useGQLQuery } from "@composables/graphql"
+import { Email, EmailCodec } from "../../helpers/backend/types/Email"
 
 import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
 import { useColorMode } from "~/composables/theming"
 
-import IconTrash from "~icons/lucide/trash"
-import IconPlus from "~icons/lucide/plus"
-import IconAlertTriangle from "~icons/lucide/alert-triangle"
-import IconMailCheck from "~icons/lucide/mail-check"
-import IconCircleDot from "~icons/lucide/circle-dot"
-import IconCircle from "~icons/lucide/circle"
-import IconArrowLeft from "~icons/lucide/arrow-left"
+import { refAutoReset } from "@vueuse/core"
 import { TippyComponent } from "vue-tippy"
+import { copyToClipboard } from "~/helpers/utils/clipboard"
+import { platform } from "~/platform"
+import IconAlertTriangle from "~icons/lucide/alert-triangle"
+import IconArrowLeft from "~icons/lucide/arrow-left"
+import IconCheck from "~icons/lucide/check"
+import IconCircle from "~icons/lucide/circle"
+import IconCircleDot from "~icons/lucide/circle-dot"
+import IconCopy from "~icons/lucide/copy"
+import IconMailCheck from "~icons/lucide/mail-check"
+import IconPlus from "~icons/lucide/plus"
+import IconTrash from "~icons/lucide/trash"
+
+const copyIcons: Record<string, Ref<typeof IconCopy | typeof IconCheck>> = {}
+const getCopyIcon = (id: string) => {
+  if (!copyIcons[id]) {
+    copyIcons[id] = refAutoReset<typeof IconCopy | typeof IconCheck>(
+      IconCopy,
+      1000
+    )
+  }
+
+  return copyIcons[id]
+}
 
 const t = useI18n()
 
@@ -405,6 +460,34 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: "hide-modal"): void
 }>()
+
+const inviteMethod = ref<"email" | "link">("email")
+
+let organizationDomain = ""
+
+onMounted(async () => {
+  const getIsSMTPEnabled = platform.infra?.getIsSMTPEnabled
+
+  if (getIsSMTPEnabled) {
+    const res = await getIsSMTPEnabled()
+
+    if (E.isRight(res)) {
+      inviteMethod.value = res.right ? "email" : "link"
+    }
+  }
+
+  const { organization } = platform
+
+  if (!organization) {
+    return
+  }
+
+  if (!organization.isDefaultCloudInstance) {
+    const orgInfo = await organization.getOrgInfo()
+
+    organizationDomain = orgInfo?.orgDomain ?? ""
+  }
+})
 
 const pendingInvites = useGQLQuery<
   GetPendingInvitesQuery,
@@ -496,6 +579,23 @@ const removeNewInvitee = (id: number) => {
   newInvites.value.splice(id, 1)
 }
 
+const copyInviteLink = (invitationID: string) => {
+  let inviteLink = ""
+
+  const { organization } = platform
+
+  if (organization && !organization.isDefaultCloudInstance) {
+    const rootDomain = organization?.getRootDomain()
+    inviteLink = `https://${organizationDomain}.${rootDomain}/join-team?id=${invitationID}`
+  } else {
+    inviteLink = `${import.meta.env.VITE_BASE_URL}/join-team?id=${invitationID}`
+  }
+
+  copyToClipboard(inviteLink)
+
+  getCopyIcon(invitationID).value = IconCheck
+}
+
 type SendInvitesErrorType =
   | {
       email: Email
@@ -505,6 +605,7 @@ type SendInvitesErrorType =
   | {
       email: Email
       status: "success"
+      invitationID: string
     }
 
 const sendInvitesResult = ref<Array<SendInvitesErrorType>>([])
@@ -555,9 +656,10 @@ const sendInvites = async () => {
                 email: newInvites.value[i].key as Email,
                 error: err,
               }),
-              () => ({
+              (invitation) => ({
                 status: "success" as const,
                 email: newInvites.value[i].key as Email,
+                invitationID: invitation.id,
               })
             )
           )
@@ -583,6 +685,8 @@ const getErrorMessage = (error: SendInvitesErrorType) => {
       return t("team.already_member")
     case "team_invite/member_has_invite":
       return t("team.member_has_invite")
+    case "user/not_found":
+      return t("team.user_not_found")
   }
 }
 

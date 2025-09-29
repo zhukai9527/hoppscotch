@@ -4,9 +4,8 @@ import { def as environmentsDef } from "./platform/environments/environments.pla
 import { def as collectionsDef } from "./platform/collections/collections.platform"
 import { def as settingsDef } from "./platform/settings/settings.platform"
 import { def as historyDef } from "./platform/history/history.platform"
-import { def as tabStateDef } from "./platform/tabState/tabState.platform"
+import { def as backendDef } from "@hoppscotch/common/platform/std/backend"
 import { proxyInterceptor } from "@hoppscotch/common/platform/std/interceptors/proxy"
-import { ExtensionInspectorService } from "@hoppscotch/common/platform/std/inspections/extension.inspector"
 import { NativeInterceptorService } from "./platform/interceptors/native"
 import { nextTick, ref, watch } from "vue"
 import { emit, listen } from "@tauri-apps/api/event"
@@ -16,6 +15,7 @@ import { appWindow } from "@tauri-apps/api/window"
 import { stdFooterItems } from "@hoppscotch/common/platform/std/ui/footerItem"
 import { stdSupportOptionItems } from "@hoppscotch/common/platform/std/ui/supportOptionsItem"
 import { ioDef } from "./platform/io"
+import { interopModule } from "./interop"
 
 const headerPaddingLeft = ref("0px")
 const headerPaddingTop = ref("0px")
@@ -32,7 +32,7 @@ const headerPaddingTop = ref("0px")
         paddingTop: headerPaddingTop,
         onHeaderAreaClick() {
           if (platform === "Darwin") {
-            // Drag thw window when the user drags the header area
+            // Drag the window when the user drags the header area
             // TODO: Ignore click on headers and fields
             appWindow.startDragging()
           }
@@ -46,24 +46,25 @@ const headerPaddingTop = ref("0px")
       collections: collectionsDef,
       settings: settingsDef,
       history: historyDef,
-      tabState: tabStateDef,
     },
+    addedHoppModules: [interopModule],
     interceptors: {
       default: "native",
       interceptors: [
         { type: "service", service: NativeInterceptorService },
-        { type: "standalone", interceptor: proxyInterceptor },
+        {
+          type: "standalone",
+          interceptor: { ...proxyInterceptor, supportsDigestAuth: true },
+        },
       ],
     },
-    additionalInspectors: [
-      { type: "service", service: ExtensionInspectorService },
-    ],
     platformFeatureFlags: {
       exportAsGIST: false,
       hasTelemetry: false,
       cookiesEnabled: true,
       promptAsUsingCookies: false,
     },
+    backend: backendDef,
   })
 
   watch(
@@ -97,17 +98,18 @@ const headerPaddingTop = ref("0px")
   }
 })()
 
-
 function isTextInput(target: EventTarget | null) {
   if (target instanceof HTMLInputElement) {
-    return target.type === 'text'
-      || target.type === 'email'
-      || target.type === 'password'
-      || target.type === 'number'
-      || target.type === 'search'
-      || target.type === 'tel'
-      || target.type === 'url'
-      || target.type === 'textarea'
+    return (
+      target.type === "text" ||
+      target.type === "email" ||
+      target.type === "password" ||
+      target.type === "number" ||
+      target.type === "search" ||
+      target.type === "tel" ||
+      target.type === "url" ||
+      target.type === "textarea"
+    )
   } else if (target instanceof HTMLTextAreaElement) {
     return true
   } else if (target instanceof HTMLElement && target.isContentEditable) {
@@ -117,8 +119,12 @@ function isTextInput(target: EventTarget | null) {
   return false
 }
 
-window.addEventListener('keydown',function(e){
-  if (e.key === "Backspace" && !isTextInput(e.target)) {
-    e.preventDefault()
-  }
-},true);
+window.addEventListener(
+  "keydown",
+  function (e) {
+    if (e.key === "Backspace" && !isTextInput(e.target)) {
+      e.preventDefault()
+    }
+  },
+  true
+)

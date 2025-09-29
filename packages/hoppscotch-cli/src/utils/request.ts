@@ -1,4 +1,9 @@
-import { HoppCollection, HoppRESTRequest } from "@hoppscotch/data";
+import {
+  Environment,
+  HoppCollection,
+  HoppRESTRequest,
+  RESTReqSchemaVersion,
+} from "@hoppscotch/data";
 import axios, { Method } from "axios";
 import * as A from "fp-ts/Array";
 import * as E from "fp-ts/Either";
@@ -27,52 +32,61 @@ import { getDurationInSeconds, getMetaDataPairs } from "./getters";
 import { preRequestScriptRunner } from "./pre-request";
 import { getTestScriptParams, hasFailedTestCases, testRunner } from "./test";
 
-// !NOTE: The `config.supported` checks are temporary until OAuth2 and Multipart Forms are supported
+/**
+ * Processes given variable, which includes checking for secret variables
+ * and getting value from system environment
+ * @param variable Variable to be processed
+ * @returns Updated variable with value from system environment
+ */
+const processVariables = (variable: Environment["variables"][number]) => {
+  if (variable.secret) {
+    return {
+      ...variable,
+      value:
+        "value" in variable ? variable.value : process.env[variable.key] || "",
+    };
+  }
+  return variable;
+};
+
+/**
+ * Processes given envs, which includes processing each variable in global
+ * and selected envs
+ * @param envs Global + selected envs used by requests with in collection
+ * @returns Processed envs with each variable processed
+ */
+const processEnvs = (envs: Partial<HoppEnvs>) => {
+  // This can take the shape `{ global: undefined, selected: undefined }` when no environment is supplied
+  const processedEnvs = {
+    global: envs.global?.map(processVariables) ?? [],
+    selected: envs.selected?.map(processVariables) ?? [],
+  };
+
+  return processedEnvs;
+};
 
 /**
  * Transforms given request data to request-config used by request-runner to
  * perform HTTP request.
  * @param req Effective request data with parsed ENVs.
- * @returns Request config with data realted to HTTP request.
+ * @returns Request config with data related to HTTP request.
  */
 export const createRequest = (req: EffectiveHoppRESTRequest): RequestConfig => {
   const config: RequestConfig = {
-    supported: true,
+    displayUrl: req.effectiveFinalDisplayURL,
   };
+
   const { finalBody, finalEndpoint, finalHeaders, finalParams } = getRequest;
+
   const reqParams = finalParams(req);
   const reqHeaders = finalHeaders(req);
+
   config.url = finalEndpoint(req);
   config.method = req.method as Method;
   config.params = getMetaDataPairs(reqParams);
   config.headers = getMetaDataPairs(reqHeaders);
-  if (req.auth.authActive) {
-    switch (req.auth.authType) {
-      case "oauth-2": {
-        // TODO: OAuth2 Request Parsing
-        // !NOTE: Temporary `config.supported` check
-        config.supported = false;
-      }
-      default: {
-        break;
-      }
-    }
-  }
-  if (req.body.contentType) {
-    config.headers["Content-Type"] = req.body.contentType;
-    switch (req.body.contentType) {
-      case "multipart/form-data": {
-        // TODO: Parse Multipart Form Data
-        // !NOTE: Temporary `config.supported` check
-        config.supported = false;
-        break;
-      }
-      default: {
-        config.data = finalBody(req);
-        break;
-      }
-    }
-  }
+
+  config.data = finalBody(req);
 
   return config;
 };
@@ -98,6 +112,7 @@ export const requestRunner =
       let status: number;
       const baseResponse = await axios(requestConfig);
       const { config } = baseResponse;
+      // PR-COMMENT: type error
       const runnerResponse: RequestRunnerResponse = {
         ...baseResponse,
         endpoint: getRequest.endpoint(config.url),
@@ -105,13 +120,6 @@ export const requestRunner =
         body: baseResponse.data,
         duration: 0,
       };
-
-      // !NOTE: Temporary `config.supported` check
-      if ((config as RequestConfig).supported === false) {
-        status = 501;
-        runnerResponse.status = status;
-        runnerResponse.statusText = responseErrors[status];
-      }
 
       const end = hrtime(start);
       const duration = getDurationInSeconds(end);
@@ -131,7 +139,7 @@ export const requestRunner =
       };
 
       if (axios.isAxiosError(e)) {
-        runnerResponse.endpoint = e.config.url ?? "";
+        runnerResponse.endpoint = e.config?.url ?? "";
 
         if (e.response) {
           const { data, status, statusText, headers } = e.response;
@@ -139,10 +147,6 @@ export const requestRunner =
           runnerResponse.statusText = statusText;
           runnerResponse.status = status;
           runnerResponse.headers = headers;
-        } else if ((e.config as RequestConfig).supported === false) {
-          status = 501;
-          runnerResponse.status = status;
-          runnerResponse.statusText = responseErrors[status];
         } else if (e.request) {
           return E.left(error({ code: "REQUEST_ERROR", data: E.toError(e) }));
         }
@@ -221,18 +225,27 @@ export const processRequest =
       effectiveFinalParams: [],
       effectiveFinalURL: "",
     };
+    let updatedEnvs = <HoppEnvs>{};
+
+    // Fetch values for secret environment variables from system environment
+    const processedEnvs = processEnvs(envs);
 
     // Executing pre-request-script
-    const preRequestRes = await preRequestScriptRunner(request, envs)();
+    const preRequestRes = await preRequestScriptRunner(
+      request,
+      processedEnvs
+    )();
     if (E.isLeft(preRequestRes)) {
       printPreRequestRunner.fail();
 
       // Updating report for errors & current result
       report.errors.push(preRequestRes.left);
-      report.result = report.result && false;
+
+      // Ensure, the CLI fails with a non-zero exit code if there are any errors
+      report.result = false;
     } else {
-      // Updating effective-request
-      effectiveRequest = preRequestRes.right;
+      // Updating effective-request and consuming updated envs after pre-request script execution
+      ({ effectiveRequest, updatedEnvs } = preRequestRes.right);
     }
 
     // Creating request-config for request-runner.
@@ -257,7 +270,9 @@ export const processRequest =
     if (E.isLeft(requestRunnerRes)) {
       // Updating report for errors & current result
       report.errors.push(requestRunnerRes.left);
-      report.result = report.result && false;
+
+      // Ensure, the CLI fails with a non-zero exit code if there are any errors
+      report.result = false;
 
       printRequestRunner.fail();
     } else {
@@ -270,7 +285,7 @@ export const processRequest =
     const testScriptParams = getTestScriptParams(
       _requestRunnerRes,
       request,
-      envs
+      updatedEnvs
     );
 
     // Executing test-runner.
@@ -280,7 +295,9 @@ export const processRequest =
 
       // Updating report with current errors & result.
       report.errors.push(testRunnerRes.left);
-      report.result = report.result && false;
+
+      // Ensure, the CLI fails with a non-zero exit code if there are any errors
+      report.result = false;
     } else {
       const { envs, testsReport, duration } = testRunnerRes.right;
       const _hasFailedTestCases = hasFailedTestCases(testsReport);
@@ -310,13 +327,13 @@ export const processRequest =
  */
 export const preProcessRequest = (
   request: HoppRESTRequest,
-  collection: HoppCollection,
+  collection: HoppCollection
 ): HoppRESTRequest => {
   const tempRequest = Object.assign({}, request);
   const { headers: parentHeaders, auth: parentAuth } = collection;
 
   if (!tempRequest.v) {
-    tempRequest.v = "1";
+    tempRequest.v = RESTReqSchemaVersion;
   }
   if (!tempRequest.name) {
     tempRequest.name = "Untitled Request";
@@ -335,8 +352,10 @@ export const preProcessRequest = (
     // Filter out header entries present in the parent (folder/collection) under the same name
     // This ensures the child headers take precedence over the parent headers
     const filteredEntries = parentHeaders.filter((parentHeaderEntries) => {
-      return !tempRequest.headers.some((reqHeaderEntries) => reqHeaderEntries.key === parentHeaderEntries.key)
-    })
+      return !tempRequest.headers.some(
+        (reqHeaderEntries) => reqHeaderEntries.key === parentHeaderEntries.key
+      );
+    });
     tempRequest.headers.push(...filteredEntries);
   } else if (!tempRequest.headers) {
     tempRequest.headers = [];

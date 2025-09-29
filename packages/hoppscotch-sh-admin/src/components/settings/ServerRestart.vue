@@ -17,19 +17,23 @@ import { useMutation } from '@urql/vue';
 import { onMounted, ref } from 'vue';
 import { useI18n } from '~/composables/i18n';
 import { useToast } from '~/composables/toast';
-import { Config, useConfigHandler } from '~/composables/useConfigHandler';
+import { useConfigHandler } from '~/composables/useConfigHandler';
 import {
   EnableAndDisableSsoDocument,
   ResetInfraConfigsDocument,
+  ToggleAnalyticsCollectionDocument,
+  ToggleSmtpDocument,
+  ToggleUserHistoryStoreDocument,
   UpdateInfraConfigsDocument,
 } from '~/helpers/backend/graphql';
+import { ServerConfigs } from '~/helpers/configs';
 
 const t = useI18n();
 const toast = useToast();
 
 const props = withDefaults(
   defineProps<{
-    workingConfigs?: Config;
+    workingConfigs?: ServerConfigs;
     reset?: boolean;
   }>(),
   {
@@ -37,16 +41,34 @@ const props = withDefaults(
   }
 );
 
+const emit = defineEmits<{
+  (e: 'mutationFailure'): void;
+}>();
+
 // Mutations to update or reset server configurations and audit logs
 const resetInfraConfigsMutation = useMutation(ResetInfraConfigsDocument);
 const updateInfraConfigsMutation = useMutation(UpdateInfraConfigsDocument);
 const updateAllowedAuthProviderMutation = useMutation(
   EnableAndDisableSsoDocument
 );
+const toggleDataSharingMutation = useMutation(
+  ToggleAnalyticsCollectionDocument
+);
+const toggleSMTPMutation = useMutation(ToggleSmtpDocument);
+
+const toggleUserHistoryStoreMutation = useMutation(
+  ToggleUserHistoryStoreDocument
+);
 
 // Mutation handlers
-const { updateInfraConfigs, updateAuthProvider, resetInfraConfigs } =
-  useConfigHandler(props.workingConfigs);
+const {
+  updateInfraConfigs,
+  updateAuthProvider,
+  resetInfraConfigs,
+  updateDataSharingConfigs,
+  toggleSMTPConfigs,
+  toggleUserHistoryStore,
+} = useConfigHandler(props.workingConfigs);
 
 // Call relevant mutations on component mount and initiate server restart
 const duration = ref(30);
@@ -64,21 +86,54 @@ const startCountdown = () => {
   }, 1000);
 };
 
+const triggerComponentUnMount = () => emit('mutationFailure');
+
 // Call relevant mutations on component mount and initiate server restart
 onMounted(async () => {
-  let success = true;
-
   if (props.reset) {
-    success = await resetInfraConfigs(resetInfraConfigsMutation);
-    if (!success) return;
+    const resetInfraConfigsResult = await resetInfraConfigs(
+      resetInfraConfigsMutation
+    );
+
+    if (!resetInfraConfigsResult) {
+      return triggerComponentUnMount();
+    }
   } else {
+    const infraResult = await updateInfraConfigs(updateInfraConfigsMutation);
+
+    if (!infraResult) {
+      return triggerComponentUnMount();
+    }
+
     const authResult = await updateAuthProvider(
       updateAllowedAuthProviderMutation
     );
-    const infraResult = await updateInfraConfigs(updateInfraConfigsMutation);
 
-    success = authResult && infraResult;
-    if (!success) return;
+    if (!authResult) {
+      return triggerComponentUnMount();
+    }
+
+    const dataSharingResult = await updateDataSharingConfigs(
+      toggleDataSharingMutation
+    );
+
+    if (!dataSharingResult) {
+      return triggerComponentUnMount();
+    }
+
+    const smtpResult = await toggleSMTPConfigs(toggleSMTPMutation);
+
+    if (!smtpResult) {
+      return triggerComponentUnMount();
+    }
+
+    const userHistoryStoreResult = await toggleUserHistoryStore(
+      toggleUserHistoryStoreMutation
+    );
+
+    if (!userHistoryStoreResult) {
+      return triggerComponentUnMount();
+    }
   }
 
   restart.value = true;

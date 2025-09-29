@@ -16,9 +16,11 @@
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
             :title="t('state.linewrap')"
-            :class="{ '!text-accent': linewrapEnabled }"
+            :class="{ '!text-accent': WRAP_LINES }"
             :icon="IconWrapText"
-            @click.prevent="linewrapEnabled = !linewrapEnabled"
+            @click.prevent="
+              toggleNestedSetting('WRAP_LINES', 'graphqlResponseBody')
+            "
           />
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip', allowHTML: true }"
@@ -44,7 +46,7 @@
           >
             <HoppButtonSecondary
               v-tippy="{ theme: 'tooltip' }"
-              :title="t('app.copy_interface_type')"
+              :title="t('action.more')"
               :icon="IconMore"
             />
             <template #content="{ hide }">
@@ -55,22 +57,23 @@
                 @keyup.escape="hide()"
               >
                 <HoppSmartItem
-                  v-for="(language, index) in interfaceLanguages"
-                  :key="index"
-                  :label="language"
-                  :icon="
-                    copiedInterfaceLanguage === language
-                      ? copyInterfaceIcon
-                      : IconCopy
+                  :label="t('response.generate_data_schema')"
+                  :icon="IconNetwork"
+                  @click="
+                    () => {
+                      invokeAction('response.schema.toggle')
+                      hide()
+                    }
                   "
-                  @click="runCopyInterface(language)"
                 />
               </div>
             </template>
           </tippy>
         </div>
       </div>
-      <div ref="schemaEditor" class="flex flex-1 flex-col"></div>
+      <div class="h-full relative overflow-auto flex flex-col flex-1">
+        <div ref="schemaEditor" class="absolute inset-0 h-full"></div>
+      </div>
     </div>
     <component
       :is="response[0].error.component"
@@ -91,17 +94,17 @@
 
 <script setup lang="ts">
 import IconWrapText from "~icons/lucide/wrap-text"
-import IconCopy from "~icons/lucide/copy"
+import IconNetwork from "~icons/lucide/network"
 import IconMore from "~icons/lucide/more-horizontal"
 import { computed, reactive, ref } from "vue"
 import { useCodemirror } from "@composables/codemirror"
 import { useI18n } from "@composables/i18n"
-import { defineActionHandler } from "~/helpers/actions"
+import { defineActionHandler, invokeAction } from "~/helpers/actions"
 import { getPlatformSpecialKey as getSpecialKey } from "~/helpers/platformutils"
 import { GQLResponseEvent } from "~/helpers/graphql/connection"
-import interfaceLanguages from "~/helpers/utils/interfaceLanguages"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
 import {
-  useCopyInterface,
   useCopyResponse,
   useDownloadResponse,
 } from "~/composables/lens-actions"
@@ -133,8 +136,8 @@ const responseString = computed(() => {
 })
 
 const schemaEditor = ref<any | null>(null)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "graphqlResponseBody")
 const copyInterfaceTippyActions = ref<any | null>(null)
-const linewrapEnabled = ref(true)
 
 useCodemirror(
   schemaEditor,
@@ -143,7 +146,7 @@ useCodemirror(
     extendedEditorConfig: {
       mode: "application/ld+json",
       readOnly: true,
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
     },
     linter: null,
     completer: null,
@@ -152,19 +155,11 @@ useCodemirror(
 )
 
 const { copyIcon, copyResponse } = useCopyResponse(responseString)
-const { copyInterfaceIcon, copyInterface } = useCopyInterface(responseString)
 const { downloadIcon, downloadResponse } = useDownloadResponse(
   "application/json",
-  responseString
+  responseString,
+  t("filename.graphql_response")
 )
-
-const copiedInterfaceLanguage = ref("")
-
-const runCopyInterface = (language: string) => {
-  copyInterface(language).then(() => {
-    copiedInterfaceLanguage.value = language
-  })
-}
 
 defineActionHandler(
   "response.file.download",
@@ -177,9 +172,3 @@ defineActionHandler(
   computed(() => !!props.response && props.response.length > 0)
 )
 </script>
-
-<style lang="scss" scoped>
-:deep(.cm-panels) {
-  @apply top-sidebarPrimaryStickyFold #{!important};
-}
-</style>

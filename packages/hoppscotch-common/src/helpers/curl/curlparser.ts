@@ -3,28 +3,28 @@
  * just adding the /browser import as a fix for now, which does not have type info on DefinitelyTyped.
  * remove/update this comment before merging the vue3 port.
  */
-import parser from "yargs-parser/browser"
-import * as O from "fp-ts/Option"
-import * as A from "fp-ts/Array"
-import { pipe, flow } from "fp-ts/function"
 import {
   FormDataKeyValue,
   HoppRESTReqBody,
   makeRESTRequest,
 } from "@hoppscotch/data"
+import * as A from "fp-ts/Array"
+import { flow, pipe } from "fp-ts/function"
+import * as O from "fp-ts/Option"
+import parser from "yargs-parser/browser"
 import { getAuthObject } from "./sub_helpers/auth"
 import { getHeaders, recordToHoppHeaders } from "./sub_helpers/headers"
-// import { getCookies } from "./sub_helpers/cookies"
-import { getQueries } from "./sub_helpers/queries"
-import { getMethod } from "./sub_helpers/method"
-import { concatParams, getURLObject } from "./sub_helpers/url"
-import { preProcessCurlCommand } from "./sub_helpers/preproc"
-import { getBody, getFArgumentMultipartData } from "./sub_helpers/body"
-import { getDefaultRESTRequest } from "../rest/default"
+import { getCookies } from "./sub_helpers/cookies"
 import {
-  objHasProperty,
   objHasArrayProperty,
+  objHasProperty,
 } from "~/helpers/functional/object"
+import { getDefaultRESTRequest } from "../rest/default"
+import { getBody, getFArgumentMultipartData } from "./sub_helpers/body"
+import { getMethod } from "./sub_helpers/method"
+import { preProcessCurlCommand } from "./sub_helpers/preproc"
+import { getQueries } from "./sub_helpers/queries"
+import { concatParams, getURLObject } from "./sub_helpers/url"
 
 const defaultRESTReq = getDefaultRESTRequest()
 
@@ -33,7 +33,27 @@ export const parseCurlCommand = (curlCommand: string) => {
   // const compressed = !!parsedArguments.compressed
 
   curlCommand = preProcessCurlCommand(curlCommand)
-  const parsedArguments = parser(curlCommand)
+
+  const args: parser.Arguments = parser(curlCommand)
+
+  const parsedArguments = pipe(
+    args,
+    O.fromPredicate(
+      (args) =>
+        objHasProperty("dataUrlencode", "string")(args) ||
+        objHasProperty("dataUrlencode", "object")(args)
+    ),
+    O.map((args) => {
+      const urlEncodedData: string[] = Array.isArray(args.dataUrlencode)
+        ? args.dataUrlencode
+        : [args.dataUrlencode]
+
+      const data = A.map(decodeURIComponent)(urlEncodedData)
+
+      return { ...args, d: data }
+    }),
+    O.getOrElse(() => args)
+  )
 
   const headerObject = getHeaders(parsedArguments)
   const { headers } = headerObject
@@ -46,7 +66,22 @@ export const parseCurlCommand = (curlCommand: string) => {
   )
 
   const method = getMethod(parsedArguments)
-  // const cookies = getCookies(parsedArguments)
+  const cookies = getCookies(parsedArguments)
+
+  // Add cookies to headers if they exist
+  if (Object.keys(cookies).length > 0) {
+    const cookieString = Object.entries(cookies)
+      .map(([key, value]) => `${key}=${value}`)
+      .join("; ")
+
+    hoppHeaders.push({
+      key: "Cookie",
+      value: cookieString,
+      active: true,
+      description: "",
+    })
+  }
+
   const urlObject = getURLObject(parsedArguments)
   const auth = getAuthObject(parsedArguments, headers, urlObject)
 
@@ -97,7 +132,16 @@ export const parseCurlCommand = (curlCommand: string) => {
     danglingParams = [...danglingParams, ...newQueries.danglingParams]
     hasBodyBeenParsed = true
   } else if (
-    rawContentType.includes("application/x-www-form-urlencoded") &&
+    (rawContentType.includes("application/x-www-form-urlencoded") ||
+      /**
+       * When using the -d option with curl for a POST operation,
+       * curl includes a default header: Content-Type: application/x-www-form-urlencoded.
+       * https://everything.curl.dev/http/post/content-type.html
+       */
+      (!rawContentType &&
+        method === "POST" &&
+        rawData &&
+        rawData.length > 0)) &&
     !!pairs &&
     Array.isArray(rawData)
   ) {
@@ -106,7 +150,7 @@ export const parseCurlCommand = (curlCommand: string) => {
     hasBodyBeenParsed = true
   }
 
-  const urlString = concatParams(urlObject, danglingParams)
+  const urlString = decodeURIComponent(concatParams(urlObject, danglingParams))
 
   let multipartUploads: Record<string, string> = pipe(
     O.of(parsedArguments),
@@ -181,5 +225,7 @@ export const parseCurlCommand = (curlCommand: string) => {
     testScript: defaultRESTReq.testScript,
     auth,
     body: finalBody,
+    requestVariables: defaultRESTReq.requestVariables,
+    responses: {},
   })
 }

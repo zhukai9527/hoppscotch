@@ -9,7 +9,6 @@ import {
   MAGIC_LINK_EXPIRED,
   VERIFICATION_TOKEN_DATA_NOT_FOUND,
   USER_NOT_FOUND,
-  USERS_NOT_FOUND,
 } from 'src/errors';
 import { MailerService } from 'src/mailer/mailer.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -18,8 +17,6 @@ import { UserService } from 'src/user/user.service';
 import { AuthService } from './auth.service';
 import * as O from 'fp-ts/Option';
 import { VerifyMagicDto } from './dto/verify-magic.dto';
-import { DateTime } from 'luxon';
-import * as argon2 from 'argon2';
 import * as E from 'fp-ts/Either';
 import { ConfigService } from '@nestjs/config';
 import { InfraConfigService } from 'src/infra-config/infra-config.service';
@@ -51,6 +48,8 @@ const user: AuthUser = {
   photoURL: 'https://en.wikipedia.org/wiki/Dwight_Schrute',
   isAdmin: false,
   refreshToken: 'hbfvdkhjbvkdvdfjvbnkhjb',
+  lastLoggedOn: currentTime,
+  lastActiveOn: currentTime,
   createdOn: currentTime,
   currentGQLSession: {},
   currentRESTSession: {},
@@ -172,9 +171,11 @@ describe('verifyMagicLinkTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(E.right(user));
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(E.right(user));
     // deletePasswordlessVerificationToken
     mockPrisma.verificationToken.delete.mockResolvedValueOnce(passwordlessData);
+    // usersService.updateUserLastLoggedOn
+    mockUser.updateUserLastLoggedOn.mockResolvedValue(E.right(true));
 
     const result = await authService.verifyMagicLinkTokens(magicLinkVerify);
     expect(result).toEqualRight({
@@ -197,9 +198,11 @@ describe('verifyMagicLinkTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(E.right(user));
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(E.right(user));
     // deletePasswordlessVerificationToken
     mockPrisma.verificationToken.delete.mockResolvedValueOnce(passwordlessData);
+    // usersService.updateUserLastLoggedOn
+    mockUser.updateUserLastLoggedOn.mockResolvedValue(E.right(true));
 
     const result = await authService.verifyMagicLinkTokens(magicLinkVerify);
     expect(result).toEqualRight({
@@ -210,9 +213,10 @@ describe('verifyMagicLinkTokens', () => {
 
   test('Should throw MAGIC_LINK_EXPIRED if passwordless token is expired', async () => {
     // validatePasswordlessTokens
-    mockPrisma.verificationToken.findUniqueOrThrow.mockResolvedValueOnce(
-      passwordlessData,
-    );
+    mockPrisma.verificationToken.findUniqueOrThrow.mockResolvedValueOnce({
+      ...passwordlessData,
+      expiresOn: new Date('2020-01-01T00:00:00Z'),
+    });
     // findUserById
     mockUser.findUserById.mockResolvedValue(O.some(user));
     // checkIfProviderAccountExists
@@ -239,7 +243,7 @@ describe('verifyMagicLinkTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(
       E.left(USER_NOT_FOUND),
     );
 
@@ -264,7 +268,7 @@ describe('verifyMagicLinkTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(E.right(user));
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(E.right(user));
     // deletePasswordlessVerificationToken
     mockPrisma.verificationToken.delete.mockRejectedValueOnce('RecordNotFound');
 
@@ -280,7 +284,7 @@ describe('generateAuthTokens', () => {
   test('Should successfully generate tokens with valid inputs', async () => {
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(E.right(user));
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(E.right(user));
 
     const result = await authService.generateAuthTokens(user.uid);
     expect(result).toEqualRight({
@@ -292,7 +296,7 @@ describe('generateAuthTokens', () => {
   test('Should throw USER_NOT_FOUND when updating refresh tokens fails', async () => {
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(
       E.left(USER_NOT_FOUND),
     );
 
@@ -319,7 +323,7 @@ describe('refreshAuthTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue(user.refreshToken);
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(
       E.left(USER_NOT_FOUND),
     );
 
@@ -348,7 +352,7 @@ describe('refreshAuthTokens', () => {
     // generateAuthTokens
     mockJWT.sign.mockReturnValue('sdhjcbjsdhcbshjdcb');
     // UpdateUserRefreshToken
-    mockUser.UpdateUserRefreshToken.mockResolvedValueOnce(
+    mockUser.updateUserRefreshToken.mockResolvedValueOnce(
       E.right({
         ...user,
         refreshToken: 'sdhjcbjsdhcbshjdcb',

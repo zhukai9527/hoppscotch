@@ -33,7 +33,7 @@
             dropItemID = ''
           }
         "
-        @contextmenu.prevent="options?.tippy.show()"
+        @contextmenu.prevent="options?.tippy?.show()"
       >
         <div
           class="flex min-w-0 flex-1 items-center justify-center"
@@ -62,7 +62,7 @@
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
             :icon="IconFilePlus"
-            :title="t('request.new')"
+            :title="t('request.add')"
             class="hidden group-hover:inline-flex"
             @click="emit('add-request')"
           />
@@ -72,6 +72,13 @@
             :title="t('folder.new')"
             class="hidden group-hover:inline-flex"
             @click="emit('add-folder')"
+          />
+          <HoppButtonSecondary
+            v-tippy="{ theme: 'tooltip' }"
+            :icon="IconPlaySquare"
+            :title="t('collection_runner.run_collection')"
+            class="hidden group-hover:inline-flex"
+            @click="emit('run-collection', props.id)"
           />
           <span>
             <tippy
@@ -94,9 +101,11 @@
                   @keyup.r="requestAction?.$el.click()"
                   @keyup.n="folderAction?.$el.click()"
                   @keyup.e="edit?.$el.click()"
+                  @keyup.d="duplicateAction?.$el.click()"
                   @keyup.delete="deleteAction?.$el.click()"
                   @keyup.x="exportAction?.$el.click()"
                   @keyup.p="propertiesAction?.$el.click()"
+                  @keyup.t="runCollectionAction?.$el.click()"
                   @keyup.escape="hide()"
                 >
                   <HoppSmartItem
@@ -124,6 +133,18 @@
                     "
                   />
                   <HoppSmartItem
+                    ref="runCollectionAction"
+                    :icon="IconPlaySquare"
+                    :label="t('collection_runner.run_collection')"
+                    :shortcut="['T']"
+                    @click="
+                      () => {
+                        emit('run-collection', props.id)
+                        hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
                     ref="edit"
                     :icon="IconEdit"
                     :label="t('action.edit')"
@@ -132,6 +153,19 @@
                       () => {
                         emit('edit-collection')
                         hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
+                    ref="duplicateAction"
+                    :icon="IconCopy"
+                    :label="t('action.duplicate')"
+                    :loading="duplicateCollectionLoading"
+                    :shortcut="['D']"
+                    @click="
+                      () => {
+                        emit('duplicate-collection'),
+                          collectionsType === 'my-collections' ? hide() : null
                       }
                     "
                   />
@@ -197,26 +231,28 @@
 </template>
 
 <script setup lang="ts">
-import IconCheckCircle from "~icons/lucide/check-circle"
-import IconFolderPlus from "~icons/lucide/folder-plus"
-import IconFilePlus from "~icons/lucide/file-plus"
-import IconMoreVertical from "~icons/lucide/more-vertical"
-import IconDownload from "~icons/lucide/download"
-import IconTrash2 from "~icons/lucide/trash-2"
-import IconEdit from "~icons/lucide/edit"
-import IconFolder from "~icons/lucide/folder"
-import IconFolderOpen from "~icons/lucide/folder-open"
-import IconSettings2 from "~icons/lucide/settings-2"
-import { ref, computed, watch } from "vue"
-import { HoppCollection } from "@hoppscotch/data"
 import { useI18n } from "@composables/i18n"
+import { HoppCollection } from "@hoppscotch/data"
+import { computed, ref, watch } from "vue"
 import { TippyComponent } from "vue-tippy"
+import { useReadonlyStream } from "~/composables/stream"
 import { TeamCollection } from "~/helpers/teams/TeamCollection"
 import {
   changeCurrentReorderStatus,
   currentReorderingStatus$,
 } from "~/newstore/reordering"
-import { useReadonlyStream } from "~/composables/stream"
+import IconCheckCircle from "~icons/lucide/check-circle"
+import IconCopy from "~icons/lucide/copy"
+import IconDownload from "~icons/lucide/download"
+import IconEdit from "~icons/lucide/edit"
+import IconFilePlus from "~icons/lucide/file-plus"
+import IconFolder from "~icons/lucide/folder"
+import IconFolderOpen from "~icons/lucide/folder-open"
+import IconFolderPlus from "~icons/lucide/folder-plus"
+import IconMoreVertical from "~icons/lucide/more-vertical"
+import IconPlaySquare from "~icons/lucide/play-square"
+import IconSettings2 from "~icons/lucide/settings-2"
+import IconTrash2 from "~icons/lucide/trash-2"
 
 type CollectionType = "my-collections" | "team-collections"
 type FolderType = "collection" | "folder"
@@ -240,6 +276,7 @@ const props = withDefaults(
     hasNoTeamAccess?: boolean
     collectionMoveLoading?: string[]
     isLastItem?: boolean
+    duplicateCollectionLoading?: boolean
   }>(),
   {
     id: "",
@@ -251,6 +288,7 @@ const props = withDefaults(
     exportLoading: false,
     hasNoTeamAccess: false,
     isLastItem: false,
+    duplicateLoading: false,
   }
 )
 
@@ -258,8 +296,10 @@ const emit = defineEmits<{
   (event: "toggle-children"): void
   (event: "add-request"): void
   (event: "add-folder"): void
+  (event: "run-collection"): void
   (event: "edit-collection"): void
   (event: "edit-properties"): void
+  (event: "duplicate-collection"): void
   (event: "export-data"): void
   (event: "remove-collection"): void
   (event: "drop-event", payload: DataTransfer): void
@@ -267,16 +307,19 @@ const emit = defineEmits<{
   (event: "dragging", payload: boolean): void
   (event: "update-collection-order", payload: DataTransfer): void
   (event: "update-last-collection-order", payload: DataTransfer): void
+  (event: "run-collection", collectionID: string): void
 }>()
 
-const tippyActions = ref<TippyComponent | null>(null)
+const tippyActions = ref<HTMLDivElement | null>(null)
 const requestAction = ref<HTMLButtonElement | null>(null)
 const folderAction = ref<HTMLButtonElement | null>(null)
 const edit = ref<HTMLButtonElement | null>(null)
+const duplicateAction = ref<HTMLButtonElement | null>(null)
 const deleteAction = ref<HTMLButtonElement | null>(null)
 const exportAction = ref<HTMLButtonElement | null>(null)
 const options = ref<TippyComponent | null>(null)
-const propertiesAction = ref<TippyComponent | null>(null)
+const propertiesAction = ref<HTMLButtonElement | null>(null)
+const runCollectionAction = ref<HTMLButtonElement | null>(null)
 
 const dragging = ref(false)
 const ordering = ref(false)
@@ -316,10 +359,10 @@ const collectionName = computed(() => {
 })
 
 watch(
-  () => props.exportLoading,
-  (val) => {
-    if (!val) {
-      options.value!.tippy.hide()
+  () => [props.exportLoading, props.duplicateCollectionLoading],
+  ([newExportLoadingVal, newDuplicateCollectionLoadingVal]) => {
+    if (!newExportLoadingVal && !newDuplicateCollectionLoadingVal) {
+      options.value!.tippy?.hide()
     }
   }
 )

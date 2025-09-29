@@ -38,6 +38,8 @@ const user: AuthUser = {
   photoURL: 'https://en.wikipedia.org/wiki/Dwight_Schrute',
   isAdmin: false,
   refreshToken: 'hbfvdkhjbvkdvdfjvbnkhjb',
+  lastLoggedOn: currentTime,
+  lastActiveOn: currentTime,
   createdOn: currentTime,
   currentGQLSession: {},
   currentRESTSession: {},
@@ -1079,7 +1081,7 @@ describe('deleteUserCollection', () => {
     // deleteCollectionData
     // deleteCollectionData --> FindMany query 1st time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
-    // deleteCollectionData --> FindMany query 2st time
+    // deleteCollectionData --> FindMany query 2nd time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
     // deleteCollectionData --> DeleteMany query
     mockPrisma.userRequest.deleteMany.mockResolvedValueOnce({ count: 0 });
@@ -1126,7 +1128,7 @@ describe('deleteUserCollection', () => {
     // deleteCollectionData
     // deleteCollectionData --> FindMany query 1st time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
-    // deleteCollectionData --> FindMany query 2st time
+    // deleteCollectionData --> FindMany query 2nd time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
     // deleteCollectionData --> DeleteMany query
     mockPrisma.userRequest.deleteMany.mockResolvedValueOnce({ count: 0 });
@@ -1149,7 +1151,7 @@ describe('deleteUserCollection', () => {
     // deleteCollectionData
     // deleteCollectionData --> FindMany query 1st time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
-    // deleteCollectionData --> FindMany query 2st time
+    // deleteCollectionData --> FindMany query 2nd time
     mockPrisma.userCollection.findMany.mockResolvedValueOnce([]);
     // deleteCollectionData --> DeleteMany query
     mockPrisma.userRequest.deleteMany.mockResolvedValueOnce({ count: 0 });

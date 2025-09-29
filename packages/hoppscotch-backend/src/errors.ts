@@ -11,6 +11,14 @@ export const ONLY_ONE_ADMIN_ACCOUNT =
   'admin/only_one_admin_account_found' as const;
 
 /**
+ * Admin user can not be deleted
+ * To delete the admin user, first make the Admin user a normal user
+ * (AdminService)
+ */
+export const ADMIN_CAN_NOT_BE_DELETED =
+  'admin/admin_can_not_be_deleted' as const;
+
+/**
  * Token Authorization failed (Check 'Authorization' Header)
  * (GqlAuthGuard)
  */
@@ -40,6 +48,18 @@ export const AUTH_PROVIDER_NOT_CONFIGURED =
  */
 export const ENV_NOT_FOUND_KEY_AUTH_PROVIDERS =
   '"VITE_ALLOWED_AUTH_PROVIDERS" is not present in .env file';
+
+/**
+ * Environment variable "DATA_ENCRYPTION_KEY" is not present in .env file
+ */
+export const ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY =
+  '"DATA_ENCRYPTION_KEY" is not present in .env file';
+
+/**
+ * Environment variable "DATA_ENCRYPTION_KEY" is changed in .env file
+ */
+export const ENV_INVALID_DATA_ENCRYPTION_KEY =
+  '"DATA_ENCRYPTION_KEY" value changed in .env file. Please undo the changes and restart the server';
 
 /**
  * Environment variable "VITE_ALLOWED_AUTH_PROVIDERS" is empty in .env file
@@ -77,6 +97,12 @@ export const USER_ALREADY_INVITED = 'admin/user_already_invited' as const;
 export const USER_UPDATE_FAILED = 'user/update_failed' as const;
 
 /**
+ * User display name validation failure
+ * (UserService)
+ */
+export const USER_SHORT_DISPLAY_NAME = 'user/short_display_name' as const;
+
+/**
  * User deletion failure
  * (UserService)
  */
@@ -98,6 +124,13 @@ export const USER_IS_OWNER = 'user/is_owner' as const;
  * (UserService)
  */
 export const USER_IS_ADMIN = 'user/is_admin' as const;
+
+/**
+ * User invite deletion failure error due to invitation not found
+ * (AdminService)
+ */
+export const USER_INVITATION_DELETION_FAILED =
+  'user/invitation_deletion_failed' as const;
 
 /**
  * Teams not found
@@ -214,6 +247,12 @@ export const TEAM_COL_SAME_NEXT_COLL =
   'team_coll/collection_and_next_collection_are_same';
 
 /**
+ * Team Collection search failed
+ * (TeamCollectionService)
+ */
+export const TEAM_COL_SEARCH_FAILED = 'team_coll/team_collection_search_failed';
+
+/**
  * Team Collection Re-Ordering Failed
  * (TeamCollectionService)
  */
@@ -269,6 +308,13 @@ export const TEAM_COLL_DATA_INVALID =
   'team_coll/team_coll_data_invalid' as const;
 
 /**
+ * Team Collection parent tree generation failed
+ * (TeamCollectionService)
+ */
+export const TEAM_COLL_PARENT_TREE_GEN_FAILED =
+  'team_coll/team_coll_parent_tree_generation_failed';
+
+/**
  * Tried to perform an action on a request that doesn't accept their member role level
  * (GqlRequestTeamMemberGuard)
  */
@@ -292,6 +338,19 @@ export const TEAM_REQ_INVALID_TARGET_COLL_ID =
  * (TeamRequestService)
  */
 export const TEAM_REQ_REORDERING_FAILED = 'team_req/reordering_failed' as const;
+
+/**
+ * Team Request search failed
+ * (TeamRequestService)
+ */
+export const TEAM_REQ_SEARCH_FAILED = 'team_req/team_request_search_failed';
+
+/**
+ * Team Request parent tree generation failed
+ * (TeamRequestService)
+ */
+export const TEAM_REQ_PARENT_TREE_GEN_FAILED =
+  'team_req/team_req_parent_tree_generation_failed';
 
 /**
  * No Postmark Sender Email defined
@@ -433,7 +492,19 @@ export const USER_ENVIRONMENT_INVALID_ENVIRONMENT_NAME =
  */
 export const USER_HISTORY_NOT_FOUND = 'user_history/history_not_found' as const;
 
-/*
+/**
+ * User history deletion failed
+ * (UserHistoryService)
+ */
+export const USER_HISTORY_DELETION_FAILED =
+  'user_history/deletion_failed' as const;
+
+/**
+ * User history feature flag is disabled
+ * (UserHistoryService)
+ */
+export const USER_HISTORY_FEATURE_FLAG_DISABLED =
+  'user_history/feature_flag_disabled';
 
 /**
  * Invalid Request Type in History
@@ -521,6 +592,18 @@ export const TOKEN_EXPIRED = 'auth/token_expired' as const;
  * (AuthService)
  */
 export const MAGIC_LINK_EXPIRED = 'auth/magic_link_expired' as const;
+
+/**
+ * Auth header was NOT found in the auth request
+ * (AuthService)
+ */
+export const AUTH_HEADER_NOT_FOUND = 'auth/auth_header_not_found' as const;
+
+/**
+ * Auth header was found but the format was invalid
+ * (AuthService)
+ */
+export const INVALID_AUTH_HEADER = 'auth/invalid_auth_header' as const;
 
 /**
  * No cookies were found in the auth request
@@ -632,6 +715,19 @@ export const MAILER_FROM_ADDRESS_UNDEFINED =
   'mailer/from_address_undefined' as const;
 
 /**
+ * MAILER_SMTP_USER environment variable is not defined
+ * (MailerModule)
+ */
+export const MAILER_SMTP_USER_UNDEFINED = 'mailer/smtp_user_undefined' as const;
+
+/**
+ * MAILER_SMTP_PASSWORD environment variable is not defined
+ * (MailerModule)
+ */
+export const MAILER_SMTP_PASSWORD_UNDEFINED =
+  'mailer/smtp_password_undefined' as const;
+
+/**
  * SharedRequest invalid request JSON format
  * (ShortcodeService)
  */
@@ -691,8 +787,105 @@ export const INFRA_CONFIG_SERVICE_NOT_CONFIGURED =
   'infra_config/service_not_configured' as const;
 
 /**
+ * Infra Config update/fetch operation not allowed
+ * (InfraConfigService)
+ */
+export const INFRA_CONFIG_OPERATION_NOT_ALLOWED =
+  'infra_config/operation_not_allowed';
+
+/**
  * Error message for when the database table does not exist
  * (InfraConfigService)
  */
 export const DATABASE_TABLE_NOT_EXIST =
   'Database migration not found. Please check the documentation for assistance: https://docs.hoppscotch.io/documentation/self-host/community-edition/install-and-build#running-migrations';
+
+/**
+ * PostHog client is not initialized
+ * (InfraConfigService)
+ */
+export const POSTHOG_CLIENT_NOT_INITIALIZED = 'posthog/client_not_initialized';
+
+/**
+ * Inputs supplied are invalid
+ */
+export const INVALID_PARAMS = 'invalid_parameters' as const;
+
+/**
+ * The provided label for the access-token is short (less than 3 characters)
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKEN_LABEL_SHORT = 'access_token/label_too_short';
+
+/**
+ * The provided expiryInDays value is not valid
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKEN_EXPIRY_INVALID = 'access_token/expiry_days_invalid';
+
+/**
+ * The provided PAT ID is invalid
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKEN_NOT_FOUND = 'access_token/access_token_not_found';
+
+/**
+ * AccessTokens is expired
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKEN_EXPIRED = 'TOKEN_EXPIRED';
+
+/**
+ * AccessTokens is invalid
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKEN_INVALID = 'TOKEN_INVALID';
+
+/**
+ * AccessTokens is invalid
+ * (AccessTokenService)
+ */
+export const ACCESS_TOKENS_INVALID_DATA_ID = 'INVALID_ID';
+
+/**
+ * The provided label for the infra-token is short (less than 3 characters)
+ * (InfraTokenService)
+ */
+export const INFRA_TOKEN_LABEL_SHORT = 'infra_token/label_too_short';
+
+/**
+ * The provided expiryInDays value is not valid
+ * (InfraTokenService)
+ */
+export const INFRA_TOKEN_EXPIRY_INVALID = 'infra_token/expiry_days_invalid';
+
+/**
+ * The provided Infra Token ID is invalid
+ * (InfraTokenService)
+ */
+export const INFRA_TOKEN_NOT_FOUND = 'infra_token/infra_token_not_found';
+
+/**
+ * Authorization missing in header (Check 'Authorization' Header)
+ * (InfraTokenGuard)
+ */
+export const INFRA_TOKEN_HEADER_MISSING =
+  'infra_token/authorization_token_missing';
+
+/**
+ * Infra Token is invalid
+ * (InfraTokenGuard)
+ */
+export const INFRA_TOKEN_INVALID_TOKEN = 'infra_token/invalid_token';
+
+/**
+ * Infra Token is expired
+ * (InfraTokenGuard)
+ */
+export const INFRA_TOKEN_EXPIRED = 'infra_token/expired';
+
+/**
+ * Token creator not found
+ * (InfraTokenService)
+ */
+export const INFRA_TOKEN_CREATOR_NOT_FOUND = 'infra_token/creator_not_found';

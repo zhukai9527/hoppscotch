@@ -54,8 +54,9 @@
       >
         <SmartEnvInput
           v-model="tab.document.request.endpoint"
-          :placeholder="`${t('request.url')}`"
+          :placeholder="`${t('request.url_placeholder')}`"
           :auto-complete-source="userHistories"
+          :auto-complete-env="true"
           :inspection-results="tabResults"
           @paste="onPasteUrl($event)"
           @enter="newSendRequest"
@@ -69,9 +70,11 @@
         :title="`${t(
           'action.send'
         )} <kbd>${getSpecialKey()}</kbd><kbd>↩</kbd>`"
-        :label="`${!loading ? t('action.send') : t('action.cancel')}`"
+        :label="`${
+          !isTabResponseLoading ? t('action.send') : t('action.cancel')
+        }`"
         class="min-w-[5rem] flex-1 rounded-r-none"
-        @click="!loading ? newSendRequest() : cancelRequest()"
+        @click="!isTabResponseLoading ? newSendRequest() : cancelRequest()"
       />
       <span class="flex">
         <tippy
@@ -237,7 +240,7 @@ import { useReadonlyStream, useStreamSubscriber } from "@composables/stream"
 import { useToast } from "@composables/toast"
 import { useVModel } from "@vueuse/core"
 import * as E from "fp-ts/Either"
-import { Ref, computed, onBeforeUnmount, ref } from "vue"
+import { computed, ref, onUnmounted } from "vue"
 import { defineActionHandler, invokeAction } from "~/helpers/actions"
 import { runMutation } from "~/helpers/backend/GQLClient"
 import { UpdateRequestDocument } from "~/helpers/backend/graphql"
@@ -255,17 +258,18 @@ import IconShare2 from "~icons/lucide/share-2"
 import { getDefaultRESTRequest } from "~/helpers/rest/default"
 import { RESTHistoryEntry, restHistory$ } from "~/newstore/history"
 import { platform } from "~/platform"
-import { HoppGQLRequest, HoppRESTRequest } from "@hoppscotch/data"
+import { HoppRESTRequest } from "@hoppscotch/data"
 import { useService } from "dioc/vue"
 import { InspectionService } from "~/services/inspection"
-import { InterceptorService } from "~/services/interceptor.service"
 import { HoppTab } from "~/services/tab"
-import { HoppRESTDocument } from "~/helpers/rest/document"
+import { HoppRequestDocument } from "~/helpers/rest/document"
 import { RESTTabService } from "~/services/tab/rest"
 import { getMethodLabelColor } from "~/helpers/rest/labelColoring"
+import { WorkspaceService } from "~/services/workspace.service"
+import { KernelInterceptorService } from "~/services/kernel-interceptor.service"
 
 const t = useI18n()
-const interceptorService = useService(InterceptorService)
+const interceptorService = useService(KernelInterceptorService)
 
 const methods = [
   "GET",
@@ -284,7 +288,7 @@ const toast = useToast()
 
 const { subscribeToStream } = useStreamSubscriber()
 
-const props = defineProps<{ modelValue: HoppTab<HoppRESTDocument> }>()
+const props = defineProps<{ modelValue: HoppTab<HoppRequestDocument> }>()
 const emit = defineEmits(["update:modelValue"])
 
 const tab = useVModel(props, "modelValue", emit)
@@ -299,6 +303,10 @@ const newMethod = computed(() => {
 const curlText = ref("")
 
 const loading = ref(false)
+
+const isTabResponseLoading = computed(
+  () => tab.value.document.response?.type === "loading"
+)
 
 const showCurlImportModal = ref(false)
 const showCodegenModal = ref(false)
@@ -316,11 +324,15 @@ const saveRequestAction = ref<any | null>(null)
 
 const history = useReadonlyStream<RESTHistoryEntry[]>(restHistory$, [])
 
-const requestCancelFunc: Ref<(() => void) | null> = ref(null)
-
 const userHistories = computed(() => {
   return history.value.map((history) => history.request.endpoint).slice(0, 10)
 })
+
+const inspectionService = useService(InspectionService)
+
+const tabs = useService(RESTTabService)
+
+const workspaceService = useService(WorkspaceService)
 
 const newSendRequest = async () => {
   if (newEndpoint.value === "" || /^\s+$/.test(newEndpoint.value)) {
@@ -336,13 +348,15 @@ const newSendRequest = async () => {
   platform.analytics?.logEvent({
     type: "HOPP_REQUEST_RUN",
     platform: "rest",
-    strategy: interceptorService.currentInterceptorID.value!,
+    strategy: interceptorService.current.value!.id,
+    workspaceType: workspaceService.currentWorkspace.value.type,
   })
 
   const [cancel, streamPromise] = runRESTRequest$(tab)
   const streamResult = await streamPromise
 
-  requestCancelFunc.value = cancel
+  tab.value.document.cancelFunction = cancel
+
   if (E.isRight(streamResult)) {
     subscribeToStream(
       streamResult.right,
@@ -391,17 +405,14 @@ const newSendRequest = async () => {
 }
 
 const ensureMethodInEndpoint = () => {
-  if (
-    !/^http[s]?:\/\//.test(newEndpoint.value) &&
-    !newEndpoint.value.startsWith("<<")
-  ) {
-    const domain = newEndpoint.value.split(/[/:#?]+/)[0]
+  const endpoint = newEndpoint.value.trim()
+  tab.value.document.request.endpoint = endpoint
+  if (!/^http[s]?:\/\//.test(endpoint) && !endpoint.startsWith("<<")) {
+    const domain = endpoint.split(/[/:#?]+/)[0]
     if (domain === "localhost" || /([0-9]+\.)*[0-9]/.test(domain)) {
-      tab.value.document.request.endpoint =
-        "http://" + tab.value.document.request.endpoint
+      tab.value.document.request.endpoint = "http://" + endpoint
     } else {
-      tab.value.document.request.endpoint =
-        "https://" + tab.value.document.request.endpoint
+      tab.value.document.request.endpoint = "https://" + endpoint
     }
   }
 }
@@ -422,9 +433,20 @@ function isCURL(curl: string) {
   return curl.includes("curl ")
 }
 
+const currentTabID = tabs.currentTabID.value
+
+onUnmounted(() => {
+  //check if current tab id exist in the current tab id lists
+  const isCurrentTabRemoved = !tabs
+    .getActiveTabs()
+    .value.some((tab) => tab.id === currentTabID)
+
+  if (isCurrentTabRemoved) cancelRequest()
+})
+
 const cancelRequest = () => {
   loading.value = false
-  requestCancelFunc.value?.()
+  tab.value.document.cancelFunction?.()
 
   updateRESTResponse(null)
 }
@@ -553,10 +575,6 @@ const saveRequest = () => {
 
 const request = ref<HoppRESTRequest | null>(null)
 
-onBeforeUnmount(() => {
-  if (loading.value) cancelRequest()
-})
-
 defineActionHandler("request.send-cancel", () => {
   if (!loading.value) newSendRequest()
   else cancelRequest()
@@ -565,26 +583,13 @@ defineActionHandler("request.reset", clearContent)
 defineActionHandler("request.share-request", shareRequest)
 defineActionHandler("request.method.next", cycleDownMethod)
 defineActionHandler("request.method.prev", cycleUpMethod)
-defineActionHandler("request.save", saveRequest)
-defineActionHandler(
-  "request.save-as",
-  (
-    req:
-      | {
-          requestType: "rest"
-          request: HoppRESTRequest
-        }
-      | {
-          requestType: "gql"
-          request: HoppGQLRequest
-        }
-  ) => {
-    showSaveRequestModal.value = true
-    if (req && req.requestType === "rest") {
-      request.value = req.request
-    }
+defineActionHandler("request-response.save", saveRequest)
+defineActionHandler("request.save-as", (req) => {
+  showSaveRequestModal.value = true
+  if (req?.requestType === "rest" && req.request) {
+    request.value = req.request
   }
-)
+})
 defineActionHandler("request.method.get", () => updateMethod("GET"))
 defineActionHandler("request.method.post", () => updateMethod("POST"))
 defineActionHandler("request.method.put", () => updateMethod("PUT"))
@@ -607,8 +612,5 @@ const isCustomMethod = computed(() => {
 
 const COLUMN_LAYOUT = useSetting("COLUMN_LAYOUT")
 
-const inspectionService = useService(InspectionService)
-
-const tabs = useService(RESTTabService)
 const tabResults = inspectionService.getResultViewFor(tabs.currentTabID.value)
 </script>

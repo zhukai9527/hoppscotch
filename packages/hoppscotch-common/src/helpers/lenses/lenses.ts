@@ -1,5 +1,5 @@
 import { HoppRESTResponse } from "../types/HoppRESTResponse"
-import jsonLens from "./jsonLens"
+import jsonLens, { isValidJSONResponse } from "./jsonLens"
 import rawLens from "./rawLens"
 import imageLens from "./imageLens"
 import htmlLens from "./htmlLens"
@@ -33,13 +33,27 @@ export function getSuitableLenses(response: HoppRESTResponse): Lens[] {
     response.type === "loading" ||
     response.type === "network_fail" ||
     response.type === "script_fail" ||
-    response.type === "fail"
+    response.type === "fail" ||
+    response.type === "extension_error"
   )
     return []
 
-  const contentType = response.headers.find((h) => h.key === "content-type")
+  // Lowercase the content-type key because HTTP Headers are case-insensitive by spec
+  const contentType = response.headers.find(
+    (h) => h.key.toLowerCase() === "content-type"
+  )
 
   if (!contentType) return [rawLens]
+
+  // Check if the response content type includes `text/plain` and the body contains valid JSON
+  if (
+    contentType.value.includes("text/plain") &&
+    response.type === "success" &&
+    isValidJSONResponse(response.body)
+  ) {
+    // Append JSON lens to the list of lenses
+    return [rawLens, jsonLens]
+  }
 
   const result = []
   for (const lens of lenses) {

@@ -9,7 +9,7 @@
       "
     >
       <HoppButtonSecondary
-        v-if="hasNoTeamAccess"
+        v-if="hasNoTeamAccess || isShowingSearchResults"
         v-tippy="{ theme: 'tooltip' }"
         disabled
         class="!rounded-none"
@@ -36,8 +36,9 @@
           v-if="!saveRequest"
           v-tippy="{ theme: 'tooltip' }"
           :disabled="
-            collectionsType.type === 'team-collections' &&
-            collectionsType.selectedTeam === undefined
+            (collectionsType.type === 'team-collections' &&
+              collectionsType.selectedTeam === undefined) ||
+            isShowingSearchResults
           "
           :icon="IconImport"
           :title="t('modal.import_export')"
@@ -58,8 +59,9 @@
             :collections-type="collectionsType.type"
             :is-open="isOpen"
             :export-loading="exportLoading"
-            :has-no-team-access="hasNoTeamAccess"
+            :has-no-team-access="hasNoTeamAccess || isShowingSearchResults"
             :collection-move-loading="collectionMoveLoading"
+            :duplicate-collection-loading="duplicateCollectionLoading"
             :is-last-item="node.data.isLastItem"
             :is-selected="
               isSelected({
@@ -86,6 +88,12 @@
                 emit('edit-collection', {
                   collectionIndex: node.id,
                   collection: node.data.data.data,
+                })
+            "
+            @duplicate-collection="
+              node.data.type === 'collections' &&
+                emit('duplicate-collection', {
+                  pathOrID: node.data.data.data.id,
                 })
             "
             @edit-properties="
@@ -115,7 +123,7 @@
               })
             "
             @dragging="
-              (isDraging) =>
+              (isDraging: boolean) =>
                 highlightChildren(isDraging ? node.data.data.data.id : null)
             "
             @toggle-children="
@@ -128,6 +136,20 @@
                     })
               }
             "
+            @run-collection="
+              emit('run-collection', {
+                collectionID: node.data.data.data.id,
+                path: node.id,
+              })
+            "
+            @click="
+              () => {
+                handleCollectionClick({
+                  collectionID: node.id,
+                  isOpen,
+                })
+              }
+            "
           />
           <CollectionsCollection
             v-if="node.data.type === 'folders'"
@@ -137,8 +159,9 @@
             :collections-type="collectionsType.type"
             :is-open="isOpen"
             :export-loading="exportLoading"
-            :has-no-team-access="hasNoTeamAccess"
+            :has-no-team-access="hasNoTeamAccess || isShowingSearchResults"
             :collection-move-loading="collectionMoveLoading"
+            :duplicate-collection-loading="duplicateCollectionLoading"
             :is-last-item="node.data.isLastItem"
             :is-selected="
               isSelected({
@@ -164,6 +187,12 @@
               node.data.type === 'folders' &&
                 emit('edit-folder', {
                   folder: node.data.data.data,
+                })
+            "
+            @duplicate-collection="
+              node.data.type === 'folders' &&
+                emit('duplicate-collection', {
+                  pathOrID: node.data.data.data.id,
                 })
             "
             @edit-properties="
@@ -196,7 +225,7 @@
               })
             "
             @dragging="
-              (isDraging) =>
+              (isDraging: boolean) =>
                 highlightChildren(isDraging ? node.data.data.data.id : null)
             "
             @toggle-children="
@@ -209,6 +238,21 @@
                     })
               }
             "
+            @run-collection="
+              emit('run-collection', {
+                collectionID: node.data.data.data.id,
+                path: node.id,
+              })
+            "
+            @click="
+              () => {
+                handleCollectionClick({
+                  // for the folders, we get a path, so we need to get the last part of the path which is the folder id
+                  collectionID: node.id.split('/').pop() as string,
+                  isOpen,
+                })
+              }
+            "
           />
           <CollectionsRequest
             v-if="node.data.type === 'requests'"
@@ -216,9 +260,9 @@
             :request-i-d="node.data.data.data.id"
             :parent-i-d="node.data.data.parentIndex"
             :collections-type="collectionsType.type"
-            :duplicate-loading="duplicateLoading"
+            :duplicate-request-loading="duplicateRequestLoading"
             :is-active="isActiveRequest(node.data.data.data.id)"
-            :has-no-team-access="hasNoTeamAccess"
+            :has-no-team-access="hasNoTeamAccess || isShowingSearchResults"
             :request-move-loading="requestMoveLoading"
             :is-last-item="node.data.isLastItem"
             :is-selected="
@@ -233,12 +277,30 @@
                   request: node.data.data.data.request,
                 })
             "
+            @edit-response="
+              emit('edit-response', {
+                folderPath: node.data.data.parentIndex,
+                requestIndex: node.data.data.data.id,
+                request: node.data.data.data.request,
+                responseName: $event.responseName,
+                responseID: $event.responseID,
+              })
+            "
             @duplicate-request="
               node.data.type === 'requests' &&
                 emit('duplicate-request', {
                   folderPath: node.data.data.parentIndex,
                   request: node.data.data.data.request,
                 })
+            "
+            @duplicate-response="
+              emit('duplicate-response', {
+                folderPath: node.data.data.parentIndex,
+                requestIndex: node.data.data.data.id,
+                request: node.data.data.data.request,
+                responseName: $event.responseName,
+                responseID: $event.responseID,
+              })
             "
             @remove-request="
               node.data.type === 'requests' &&
@@ -247,6 +309,15 @@
                   requestIndex: node.data.data.data.id,
                 })
             "
+            @remove-response="
+              emit('remove-response', {
+                folderPath: node.data.data.parentIndex,
+                requestIndex: node.data.data.data.id,
+                request: node.data.data.data.request,
+                responseName: $event.responseName,
+                responseID: $event.responseID,
+              })
+            "
             @select-request="
               node.data.type === 'requests' &&
                 selectRequest({
@@ -254,6 +325,15 @@
                   requestIndex: node.data.data.data.id,
                   folderPath: getPath(node.id),
                 })
+            "
+            @select-response="
+              emit('select-response', {
+                responseName: $event.responseName,
+                responseID: $event.responseID,
+                request: node.data.data.data.request,
+                folderPath: getPath(node.id),
+                requestIndex: node.data.data.data.id,
+              })
             "
             @share-request="
               node.data.type === 'requests' &&
@@ -283,7 +363,15 @@
         </template>
         <template #emptyNode="{ node }">
           <HoppSmartPlaceholder
-            v-if="node === null"
+            v-if="filterText.length !== 0 && teamCollectionList.length === 0"
+            :text="`${t('state.nothing_found')} ‟${filterText}”`"
+          >
+            <template #icon>
+              <icon-lucide-search class="svg-icons opacity-75" />
+            </template>
+          </HoppSmartPlaceholder>
+          <HoppSmartPlaceholder
+            v-else-if="node === null"
             :src="`/images/states/${colorMode.value}/pack.svg`"
             :alt="`${t('empty.collections')}`"
             :text="t('empty.collections')"
@@ -361,7 +449,6 @@ import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
 import IconImport from "~icons/lucide/folder-down"
 import { computed, PropType, Ref, toRef } from "vue"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
 import { useI18n } from "@composables/i18n"
 import { useColorMode } from "@composables/theming"
 import { TeamCollection } from "~/helpers/teams/TeamCollection"
@@ -374,17 +461,16 @@ import * as O from "fp-ts/Option"
 import { Picked } from "~/helpers/types/HoppPicked.js"
 import { RESTTabService } from "~/services/tab/rest"
 import { useService } from "dioc/vue"
+import { TeamWorkspace } from "~/services/workspace.service"
 
 const t = useI18n()
 const colorMode = useColorMode()
 const tabs = useService(RESTTabService)
 
-type SelectedTeam = GetMyTeamsQuery["myTeams"][number] | undefined
-
 type CollectionType =
   | {
       type: "team-collections"
-      selectedTeam: SelectedTeam
+      selectedTeam: TeamWorkspace
     }
   | { type: "my-collections"; selectedTeam: undefined }
 
@@ -392,6 +478,11 @@ const props = defineProps({
   collectionsType: {
     type: Object as PropType<CollectionType>,
     default: () => ({ type: "my-collections", selectedTeam: undefined }),
+    required: true,
+  },
+  filterText: {
+    type: String as PropType<string>,
+    default: "",
     required: true,
   },
   teamCollectionList: {
@@ -414,7 +505,12 @@ const props = defineProps({
     default: false,
     required: false,
   },
-  duplicateLoading: {
+  duplicateRequestLoading: {
+    type: Boolean,
+    default: false,
+    required: false,
+  },
+  duplicateCollectionLoading: {
     type: Boolean,
     default: false,
     required: false,
@@ -435,6 +531,16 @@ const props = defineProps({
     required: false,
   },
 })
+
+const isShowingSearchResults = computed(() => props.filterText.length > 0)
+
+type ResponsePayload = {
+  folderPath: string
+  requestIndex: string
+  request: HoppRESTRequest
+  responseName: string
+  responseID: string
+}
 
 const emit = defineEmits<{
   (
@@ -465,6 +571,13 @@ const emit = defineEmits<{
     }
   ): void
   (
+    event: "duplicate-collection",
+    payload: {
+      pathOrID: string
+      collectionSyncID?: string
+    }
+  ): void
+  (
     event: "edit-properties",
     payload: {
       collectionIndex: string
@@ -478,6 +591,7 @@ const emit = defineEmits<{
       request: HoppRESTRequest
     }
   ): void
+  (event: "edit-response", payload: ResponsePayload): void
   (
     event: "duplicate-request",
     payload: {
@@ -485,6 +599,7 @@ const emit = defineEmits<{
       request: HoppRESTRequest
     }
   ): void
+  (event: "duplicate-response", payload: ResponsePayload): void
   (event: "export-data", payload: TeamCollection): void
   (event: "remove-collection", payload: string): void
   (event: "remove-folder", payload: string): void
@@ -495,6 +610,7 @@ const emit = defineEmits<{
       requestIndex: string
     }
   ): void
+  (event: "remove-response", payload: ResponsePayload): void
   (
     event: "select-request",
     payload: {
@@ -504,6 +620,7 @@ const emit = defineEmits<{
       folderPath: string
     }
   ): void
+  (event: "select-response", payload: ResponsePayload): void
   (
     event: "share-request",
     payload: {
@@ -543,10 +660,22 @@ const emit = defineEmits<{
       }
     }
   ): void
+  (
+    event: "collection-click",
+    payload: {
+      // if the collection is open or not in the tree
+      isOpen: boolean
+      collectionID: string
+    }
+  ): void
   (event: "select", payload: Picked | null): void
   (event: "expand-team-collection", payload: string): void
   (event: "display-modal-add"): void
   (event: "display-modal-import-export"): void
+  (
+    event: "run-collection",
+    payload: { collectionID: string; path: string }
+  ): void
 }>()
 
 const getPath = (path: string) => {
@@ -555,13 +684,25 @@ const getPath = (path: string) => {
   return pathArray.join("/")
 }
 
+const handleCollectionClick = (payload: {
+  collectionID: string
+  isOpen: boolean
+}) => {
+  const { collectionID, isOpen } = payload
+
+  emit("collection-click", {
+    collectionID,
+    isOpen,
+  })
+}
+
 const teamCollectionsList = toRef(props, "teamCollectionList")
 
 const hasNoTeamAccess = computed(
   () =>
     props.collectionsType.type === "team-collections" &&
     (props.collectionsType.selectedTeam === undefined ||
-      props.collectionsType.selectedTeam.myRole === "VIEWER")
+      props.collectionsType.selectedTeam.role === "VIEWER")
 )
 
 const isSelected = ({
@@ -602,7 +743,8 @@ const isActiveRequest = (requestID: string) => {
     O.filter(
       (active) =>
         active.originLocation === "team-collection" &&
-        active.requestID === requestID
+        active.requestID === requestID &&
+        active.exampleID === undefined
     ),
     O.isSome
   )
@@ -624,7 +766,7 @@ const selectRequest = (data: {
       request: request,
       requestIndex: requestIndex,
       isActive: isActiveRequest(requestIndex),
-      folderPath: data.folderPath,
+      folderPath: data.folderPath ?? "",
     })
   }
 }

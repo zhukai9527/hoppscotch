@@ -1,7 +1,14 @@
 <template>
-  <div class="flex flex-col justify-center">
+  <div class="flex flex-col justify-center h-screen">
     <div
-      v-if="invalidLink"
+      v-if="sharedRequestDetails.loading"
+      class="flex justify-center items-center py-5"
+    >
+      <HoppSmartSpinner />
+    </div>
+
+    <div
+      v-else-if="E.isLeft(sharedRequestDetails.data) || invalidLink"
       class="flex flex-1 flex-col items-center justify-center p-8"
     >
       <icon-lucide-alert-triangle class="svg-icons mb-2 opacity-75" />
@@ -12,9 +19,10 @@
         {{ t("error.invalid_embed_link") }}
       </p>
     </div>
+
     <Embeds
-      v-else-if="!invalidLink && tab"
-      v-model:modelTab="tab"
+      v-else-if="tab"
+      v-model:model-tab="tab"
       :properties="properties"
       :shared-request-i-d="sharedRequestID"
     />
@@ -38,7 +46,7 @@ import {
   safelyExtractRESTRequest,
 } from "@hoppscotch/data"
 import { HoppTab } from "~/services/tab"
-import { HoppRESTDocument } from "~/helpers/rest/document"
+import { HoppRequestDocument } from "~/helpers/rest/document"
 import { applySetting } from "~/newstore/settings"
 import { useI18n } from "~/composables/i18n"
 
@@ -61,12 +69,13 @@ const sharedRequestDetails = useGQLQuery<
   },
 })
 
-const tab = ref<HoppTab<HoppRESTDocument>>({
+const tab = ref<HoppTab<HoppRequestDocument>>({
   id: "0",
   document: {
     request: getDefaultRESTRequest(),
     response: null,
     isDirty: false,
+    type: "request",
   },
 })
 

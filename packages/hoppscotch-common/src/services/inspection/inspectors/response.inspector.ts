@@ -1,7 +1,10 @@
 import { Service } from "dioc"
 import { InspectionService, Inspector, InspectorResult } from ".."
 import { getI18n } from "~/modules/i18n"
-import { HoppRESTRequest } from "@hoppscotch/data"
+import {
+  HoppRESTRequest,
+  HoppRESTResponseOriginalRequest,
+} from "@hoppscotch/data"
 import { markRaw } from "vue"
 import IconAlertTriangle from "~icons/lucide/alert-triangle"
 import { HoppRESTResponse } from "~/helpers/types/HoppRESTResponse"
@@ -23,14 +26,12 @@ export class ResponseInspectorService extends Service implements Inspector {
 
   private readonly inspection = this.bind(InspectionService)
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.inspection.registerInspector(this)
   }
 
   getInspections(
-    _req: Readonly<Ref<HoppRESTRequest>>,
+    _req: Readonly<Ref<HoppRESTRequest | HoppRESTResponseOriginalRequest>>,
     res: Readonly<Ref<HoppRESTResponse | null | undefined>>
   ) {
     return computed(() => {
@@ -67,7 +68,7 @@ export class ResponseInspectorService extends Service implements Inspector {
           },
           doc: {
             text: this.t("action.learn_more"),
-            link: "https://docs.hoppscotch.io/",
+            link: "https://docs.hoppscotch.io/documentation/features/inspections",
           },
         })
       }

@@ -32,68 +32,16 @@
               @keyup.escape="hide()"
             >
               <HoppSmartItem
-                label="None"
-                :icon="authName === 'None' ? IconCircleDot : IconCircle"
-                :active="authName === 'None'"
+                v-for="item in authTypes"
+                :key="item.key"
+                :label="item.label"
+                :icon="item.key === authType ? IconCircleDot : IconCircle"
+                :active="item.key === authType"
                 @click="
                   () => {
-                    auth.authType = 'none'
-                    hide()
-                  }
-                "
-              />
-              <HoppSmartItem
-                v-if="!isRootCollection"
-                label="Inherit"
-                :icon="authName === 'Inherit' ? IconCircleDot : IconCircle"
-                :active="authName === 'Inherit'"
-                @click="
-                  () => {
-                    auth.authType = 'inherit'
-                    hide()
-                  }
-                "
-              />
-              <HoppSmartItem
-                label="Basic Auth"
-                :icon="authName === 'Basic Auth' ? IconCircleDot : IconCircle"
-                :active="authName === 'Basic Auth'"
-                @click="
-                  () => {
-                    auth.authType = 'basic'
-                    hide()
-                  }
-                "
-              />
-              <HoppSmartItem
-                label="Bearer Token"
-                :icon="authName === 'Bearer' ? IconCircleDot : IconCircle"
-                :active="authName === 'Bearer'"
-                @click="
-                  () => {
-                    auth.authType = 'bearer'
-                    hide()
-                  }
-                "
-              />
-              <HoppSmartItem
-                label="OAuth 2.0"
-                :icon="authName === 'OAuth 2.0' ? IconCircleDot : IconCircle"
-                :active="authName === 'OAuth 2.0'"
-                @click="
-                  () => {
-                    auth.authType = 'oauth-2'
-                    hide()
-                  }
-                "
-              />
-              <HoppSmartItem
-                label="API key"
-                :icon="authName === 'API key' ? IconCircleDot : IconCircle"
-                :active="authName === 'API key'"
-                @click="
-                  () => {
-                    auth.authType = 'api-key'
+                    item.handler
+                      ? item.handler()
+                      : (auth = { ...auth, authType: item.key } as HoppRESTAuth)
                     hide()
                   }
                 "
@@ -150,7 +98,7 @@
     <div v-else class="flex flex-1 border-b border-dividerLight">
       <div class="w-2/3 border-r border-dividerLight">
         <div v-if="auth.authType === 'basic'">
-          <HttpAuthorizationBasic v-model="auth" />
+          <HttpAuthorizationBasic v-model="auth" :envs="envs" />
         </div>
         <div v-if="auth.authType === 'inherit'" class="p-4">
           <span v-if="inheritedProperties?.auth">
@@ -169,17 +117,45 @@
         </div>
         <div v-if="auth.authType === 'bearer'">
           <div class="flex flex-1 border-b border-dividerLight">
-            <SmartEnvInput v-model="auth.token" placeholder="Token" />
+            <SmartEnvInput
+              v-model="auth.token"
+              placeholder="Token"
+              :auto-complete-env="true"
+              :envs="envs"
+              class="px-4"
+            />
           </div>
         </div>
-        <div v-if="auth.authType === 'oauth-2'">
+        <div v-if="auth.authType === 'oauth-2'" class="w-full">
           <div class="flex flex-1 border-b border-dividerLight">
-            <SmartEnvInput v-model="auth.token" placeholder="Token" />
+            <!-- Ensure a new object is assigned here to avoid reactivity issues -->
+            <SmartEnvInput
+              :model-value="auth.grantTypeInfo.token"
+              placeholder="Token"
+              :envs="envs"
+              @update:model-value="
+                auth.grantTypeInfo = { ...auth.grantTypeInfo, token: $event }
+              "
+            />
           </div>
-          <HttpOAuth2Authorization v-model="auth" />
+          <HttpAuthorizationOAuth2
+            v-model="auth"
+            :is-collection-property="isCollectionProperty"
+            :envs="envs"
+            :source="source"
+          />
         </div>
         <div v-if="auth.authType === 'api-key'">
-          <HttpAuthorizationApiKey v-model="auth" />
+          <HttpAuthorizationApiKey v-model="auth" :envs="envs" />
+        </div>
+        <div v-if="auth.authType === 'aws-signature'">
+          <HttpAuthorizationAWSSign v-model="auth" :envs="envs" />
+        </div>
+        <div v-if="auth.authType === 'hawk'">
+          <HttpAuthorizationHAWK v-model="auth" :envs="envs" />
+        </div>
+        <div v-if="auth.authType === 'digest'">
+          <HttpAuthorizationDigest v-model="auth" :envs="envs" />
         </div>
       </div>
       <div
@@ -202,30 +178,47 @@
 </template>
 
 <script setup lang="ts">
-import IconHelpCircle from "~icons/lucide/help-circle"
-import IconTrash2 from "~icons/lucide/trash-2"
-import IconExternalLink from "~icons/lucide/external-link"
-import IconCircleDot from "~icons/lucide/circle-dot"
-import IconCircle from "~icons/lucide/circle"
-import { computed, ref } from "vue"
-import { HoppRESTAuth } from "@hoppscotch/data"
-import { pluckRef } from "@composables/ref"
 import { useI18n } from "@composables/i18n"
+import { pluckRef } from "@composables/ref"
 import { useColorMode } from "@composables/theming"
 import { useVModel } from "@vueuse/core"
-import { onMounted } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { HoppInheritedProperty } from "~/helpers/types/HoppInheritedProperties"
+import { AggregateEnvironment } from "~/newstore/environments"
+import IconCircle from "~icons/lucide/circle"
+import IconCircleDot from "~icons/lucide/circle-dot"
+import IconExternalLink from "~icons/lucide/external-link"
+import IconHelpCircle from "~icons/lucide/help-circle"
+import IconTrash2 from "~icons/lucide/trash-2"
+
+import { getDefaultAuthCodeOauthFlowParams } from "~/services/oauth/flows/authCode"
+import {
+  HoppRESTAuth,
+  HoppRESTAuthAWSSignature,
+  HoppRESTAuthDigest,
+  HoppRESTAuthHAWK,
+  HoppRESTAuthOAuth2,
+} from "@hoppscotch/data"
 
 const t = useI18n()
 
 const colorMode = useColorMode()
 
-const props = defineProps<{
-  modelValue: HoppRESTAuth
-  isCollectionProperty?: boolean
-  isRootCollection?: boolean
-  inheritedProperties?: HoppInheritedProperty
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: HoppRESTAuth
+    isCollectionProperty?: boolean
+    isRootCollection?: boolean
+    inheritedProperties?: HoppInheritedProperty
+    envs?: AggregateEnvironment[]
+    source?: "REST" | "GraphQL"
+  }>(),
+  {
+    source: "REST",
+    envs: undefined,
+    inheritedProperties: undefined,
+  }
+)
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: HoppRESTAuth): void
@@ -242,30 +235,145 @@ onMounted(() => {
   }
 })
 
-const AUTH_KEY_NAME = {
-  basic: "Basic Auth",
-  bearer: "Bearer",
-  "oauth-2": "OAuth 2.0",
-  "api-key": "API key",
-  none: "None",
-  inherit: "Inherit",
-} as const
+type AuthType = {
+  key: HoppRESTAuth["authType"]
+  label: string
+  handler?: () => void
+}
+
+const selectAPIKeyAuthType = () => {
+  auth.value = {
+    ...auth.value,
+    authType: "api-key",
+    addTo: "HEADERS",
+  } as HoppRESTAuth
+}
+
+const selectAWSSignatureAuthType = () => {
+  const {
+    accessKey = "",
+    secretKey = "",
+    region = "",
+    serviceName = "",
+    addTo = "HEADERS",
+  } = auth.value as HoppRESTAuthAWSSignature
+
+  auth.value = {
+    ...auth.value,
+    authType: "aws-signature",
+    addTo,
+    accessKey,
+    secretKey,
+    region,
+    serviceName,
+  }
+}
+
+const selectHAWKAuthType = () => {
+  const { algorithm = "sha256" } = auth.value as HoppRESTAuthHAWK
+  auth.value = {
+    ...auth.value,
+    authType: "hawk",
+    algorithm,
+  } as HoppRESTAuth
+}
+
+const selectDigestAuthType = () => {
+  const {
+    username = "",
+    password = "",
+    algorithm = "MD5",
+  } = auth.value as HoppRESTAuthDigest
+
+  auth.value = {
+    ...auth.value,
+    authType: "digest",
+    username,
+    password,
+    algorithm,
+  } as HoppRESTAuth
+}
+
+const authTypes: AuthType[] = [
+  {
+    key: "inherit",
+    label: "Inherit",
+  },
+  {
+    key: "none",
+    label: "None",
+  },
+  {
+    key: "basic",
+    label: "Basic Auth",
+  },
+  {
+    key: "digest",
+    label: "Digest Auth",
+    handler: selectDigestAuthType,
+  },
+  {
+    key: "bearer",
+    label: "Bearer",
+  },
+  {
+    key: "oauth-2",
+    label: "OAuth 2.0",
+    handler: selectOAuth2AuthType,
+  },
+  {
+    key: "api-key",
+    label: "API Key",
+    handler: selectAPIKeyAuthType,
+  },
+  {
+    key: "aws-signature",
+    label: "AWS Signature",
+    handler: selectAWSSignatureAuthType,
+  },
+  {
+    key: "hawk",
+    label: "HAWK",
+    handler: selectHAWKAuthType,
+  },
+]
 
 const authType = pluckRef(auth, "authType")
-const authName = computed(() =>
-  AUTH_KEY_NAME[authType.value] ? AUTH_KEY_NAME[authType.value] : "None"
-)
-
 const getAuthName = (type: HoppRESTAuth["authType"] | undefined) => {
   if (!type) return "None"
-  return AUTH_KEY_NAME[type] ? AUTH_KEY_NAME[type] : "None"
+  return authTypes.find((a) => a.key === type)?.label || "None"
+}
+const authName = computed(() => getAuthName(authType.value))
+
+function selectOAuth2AuthType() {
+  const defaultGrantTypeInfo: HoppRESTAuthOAuth2["grantTypeInfo"] = {
+    ...getDefaultAuthCodeOauthFlowParams(),
+    grantType: "AUTHORIZATION_CODE",
+    token: "",
+  }
+
+  // @ts-expect-error - the existing grantTypeInfo might be in the auth object, typescript doesnt know that
+  const existingGrantTypeInfo = auth.value.grantTypeInfo as
+    | HoppRESTAuthOAuth2["grantTypeInfo"]
+    | undefined
+
+  const grantTypeInfo = existingGrantTypeInfo
+    ? existingGrantTypeInfo
+    : defaultGrantTypeInfo
+
+  auth.value = {
+    ...auth.value,
+    authType: "oauth-2",
+    addTo: "HEADERS",
+    grantTypeInfo: grantTypeInfo,
+  }
 }
 
 const authActive = pluckRef(auth, "authActive")
 
 const clearContent = () => {
   auth.value = {
-    authType: "none",
+    authType: "inherit",
     authActive: true,
   }
 }

@@ -4,8 +4,8 @@
 
 import { Ref, onBeforeUnmount, onMounted, reactive, watch } from "vue"
 import { BehaviorSubject } from "rxjs"
-import { HoppRESTDocument } from "./rest/document"
-import { HoppGQLRequest, HoppRESTRequest } from "@hoppscotch/data"
+import { HoppRequestDocument } from "./rest/document"
+import { Environment, HoppGQLRequest, HoppRESTRequest } from "@hoppscotch/data"
 import { RESTOptionTabs } from "~/components/http/RequestOptions.vue"
 import { HoppGQLSaveContext } from "./graphql/document"
 import { GQLOptionTabs } from "~/components/graphql/RequestOptions.vue"
@@ -16,7 +16,7 @@ export type HoppAction =
   | "request.send-cancel" // Send/Cancel a Hoppscotch Request
   | "request.reset" // Clear request data
   | "request.share-request" // Share Request
-  | "request.save" // Save to Collections
+  | "request-response.save" // Save Request or Response
   | "request.save-as" // Save As
   | "request.rename" // Rename request on REST or GraphQL
   | "request.method.next" // Select Next Method
@@ -36,6 +36,7 @@ export type HoppAction =
   | "collection.new" // Create root collection
   | "flyouts.chat.open" // Shows the keybinds flyout
   | "flyouts.keybinds.toggle" // Shows the keybinds flyout
+  | "modals.collection.import" // Shows the collection import modal
   | "modals.search.toggle" // Shows the search modal
   | "modals.support.toggle" // Shows the support modal
   | "modals.share.toggle" // Shows the share modal
@@ -43,6 +44,7 @@ export type HoppAction =
   | "modals.environment.new" // Add new environment
   | "modals.environment.delete-selected" // Delete Selected Environment
   | "modals.my.environment.edit" // Edit current personal environment
+  | "modals.global.environment.update" // Update global environment
   | "modals.team.environment.edit" // Edit current team environment
   | "modals.team.new" // Add new team
   | "modals.team.edit" // Edit selected team
@@ -59,13 +61,25 @@ export type HoppAction =
   | "settings.theme.dark" // Use dark theme
   | "settings.theme.black" // Use black theme
   | "response.preview.toggle" // Toggle response preview
+  | "response.schema.toggle" // Toggle response data schema
   | "response.file.download" // Download response as file
   | "response.copy" // Copy response to clipboard
+  | "response.save" // Save response
+  | "response.save-as-example" // Save response as example
   | "modals.login.toggle" // Login to Hoppscotch
+  | "modals.instance-switcher.toggle" // Switch Hoppscotch instances (self-hosted)
   | "history.clear" // Clear REST History
   | "user.login" // Login to Hoppscotch
   | "user.logout" // Log out of Hoppscotch
   | "editor.format" // Format editor content
+  | "modals.team.delete" // Delete team
+  | "workspace.switch" // Switch workspace
+  | "rest.request.open" // Open REST request
+  | "request.open-tab" // Open REST request
+  | "share.request" // Share REST request
+  | "tab.duplicate-tab" // Duplicate REST request
+  | "gql.request.open" // Open GraphQL request
+  | "agent.open-registration-modal" // Open Hoppscotch Agent registration modal
 
 /**
  * Defines the arguments, if present for a given type that is required to be passed on
@@ -86,13 +100,19 @@ type HoppActionArgsMap = {
     }
     text: string | null
   }
+  "modals.global.environment.update": {
+    variables?: Environment["variables"]
+    isSecret?: boolean
+  }
   "modals.my.environment.edit": {
     envName: string
     variableName?: string
+    isSecret?: boolean
   }
   "modals.team.environment.edit": {
     envName: string
     variableName?: string
+    isSecret?: boolean
   }
   "modals.team.delete": {
     teamId: string
@@ -101,17 +121,18 @@ type HoppActionArgsMap = {
     teamId: string
   }
   "rest.request.open": {
-    doc: HoppRESTDocument
+    doc: HoppRequestDocument
   }
   "request.save-as":
     | {
         requestType: "rest"
-        request: HoppRESTRequest
+        request: HoppRESTRequest | null
       }
     | {
         requestType: "gql"
         request: HoppGQLRequest
       }
+    | undefined
   "request.open-tab": {
     tab: RESTOptionTabs | GQLOptionTabs
   }
@@ -121,7 +142,6 @@ type HoppActionArgsMap = {
   "tab.duplicate-tab": {
     tabID?: string
   }
-
   "gql.request.open": {
     request: HoppGQLRequest
     saveContext?: HoppGQLSaveContext
@@ -132,10 +152,22 @@ type HoppActionArgsMap = {
   }
 }
 
+type KeysWithValueUndefined<T> = {
+  [K in keyof T]: undefined extends T[K] ? K : never
+}[keyof T]
+
 /**
  * HoppActions which require arguments for their invocation
  */
 export type HoppActionWithArgs = keyof HoppActionArgsMap
+
+/**
+ * HoppActions which optionally takes in arguments for their invocation
+ */
+
+export type HoppActionWithOptionalArgs =
+  | HoppActionWithNoArgs
+  | KeysWithValueUndefined<HoppActionArgsMap>
 
 /**
  * HoppActions which do not require arguments for their invocation
@@ -145,27 +177,26 @@ export type HoppActionWithNoArgs = Exclude<HoppAction, HoppActionWithArgs>
 /**
  * Resolves the argument type for a given HoppAction
  */
-type ArgOfHoppAction<A extends HoppAction | HoppActionWithArgs> =
-  A extends HoppActionWithArgs ? HoppActionArgsMap[A] : undefined
+type ArgOfHoppAction<A extends HoppAction> = A extends HoppActionWithArgs
+  ? HoppActionArgsMap[A]
+  : undefined
 
 /**
  * Resolves the action function for a given HoppAction, used by action handler function defs
  */
-type ActionFunc<A extends HoppAction | HoppActionWithArgs> =
-  A extends HoppActionWithArgs ? (arg: ArgOfHoppAction<A>) => void : () => void
+type ActionFunc<A extends HoppAction> = A extends HoppActionWithArgs
+  ? (arg: ArgOfHoppAction<A>, trigger?: InvocationTriggers) => void
+  : (_?: undefined, trigger?: InvocationTriggers) => void
 
 type BoundActionList = {
-  // eslint-disable-next-line no-unused-vars
-  [A in HoppAction | HoppActionWithArgs]?: Array<ActionFunc<A>>
+  [A in HoppAction]?: Array<ActionFunc<A>>
 }
 
 const boundActions: BoundActionList = reactive({})
 
-export const activeActions$ = new BehaviorSubject<
-  (HoppAction | HoppActionWithArgs)[]
->([])
+export const activeActions$ = new BehaviorSubject<HoppAction[]>([])
 
-export function bindAction<A extends HoppAction | HoppActionWithArgs>(
+export function bindAction<A extends HoppAction>(
   action: A,
   handler: ActionFunc<A>
 ) {
@@ -179,27 +210,33 @@ export function bindAction<A extends HoppAction | HoppActionWithArgs>(
   activeActions$.next(Object.keys(boundActions) as HoppAction[])
 }
 
+export type InvocationTriggers = "keypress" | "mouseclick"
+
 type InvokeActionFunc = {
-  (action: HoppActionWithNoArgs, args?: undefined): void
+  (
+    action: HoppActionWithOptionalArgs,
+    args?: undefined,
+    trigger?: InvocationTriggers
+  ): void
   <A extends HoppActionWithArgs>(action: A, args: HoppActionArgsMap[A]): void
 }
 
 /**
- * Invokes a action, triggering action handlers if any registered.
- * The second argument parameter is optional if your action has no args required
+ * Invokes an action, triggering action handlers if any registered.
+ * The second and third arguments are optional
  * @param action The action to fire
  * @param args The argument passed to the action handler. Optional if action has no args required
+ * @param trigger Optionally supply the trigger that invoked the action (keypress/mouseclick)
  */
-export const invokeAction: InvokeActionFunc = <
-  A extends HoppAction | HoppActionWithArgs,
->(
+export const invokeAction: InvokeActionFunc = <A extends HoppAction>(
   action: A,
-  args: ArgOfHoppAction<A>
+  args?: ArgOfHoppAction<A>,
+  trigger?: InvocationTriggers
 ) => {
-  boundActions[action]?.forEach((handler) => handler(args! as any))
+  boundActions[action]?.forEach((handler) => handler(args! as any, trigger))
 }
 
-export function unbindAction<A extends HoppAction | HoppActionWithArgs>(
+export function unbindAction<A extends HoppAction>(
   action: A,
   handler: ActionFunc<A>
 ) {
@@ -232,7 +269,7 @@ export function isActionBound(action: HoppAction): Ref<boolean> {
  * @param handler The function to be called when the action is invoked
  * @param isActive A ref that indicates whether the action is active
  */
-export function defineActionHandler<A extends HoppAction | HoppActionWithArgs>(
+export function defineActionHandler<A extends HoppAction>(
   action: A,
   handler: ActionFunc<A>,
   isActive: Ref<boolean> | undefined = undefined
