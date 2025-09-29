@@ -91,6 +91,13 @@
                 collection: node.data.data.data,
               })
             "
+            @create-mock-server="
+              node.data.type === 'collections' &&
+              emit('create-mock-server', {
+                collectionIndex: node.id,
+                collection: node.data.data.data,
+              })
+            "
             @export-data="
               node.data.type === 'collections' &&
               emit('export-data', node.data.data.data)
@@ -619,6 +626,13 @@ const emit = defineEmits<{
   (event: "select", payload: Picked | null): void
   (event: "display-modal-import-export"): void
   (event: "select-response", payload: ResponsePayload): void
+  (
+    event: "create-mock-server",
+    payload: {
+      collectionIndex: string
+      collection: HoppCollection
+    }
+  ): void
 }>()
 
 const refFilterCollection = toRef(props, "filteredCollections")
